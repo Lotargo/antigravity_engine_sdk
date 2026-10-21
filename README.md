@@ -7,6 +7,9 @@ SDK запускает `language_server` самостоятельно, испо�
 Antigravity через системное хранилище и общается с процессом через локальный
 Connect JSON RPC. Работает без запуска Desktop и без agy CLI.
 
+Нативная **Go-версия**: [go/README.md](go/README.md).
+Отдельный тестовый стенд с mock/live режимами: [go/testbench/](go/testbench/README.md).
+
 ## Установка
 
 Python 3.10+, установленный Antigravity 2.x и выполненный хотя бы один раз вход
