@@ -51,17 +51,35 @@ type EditorResponse struct {
 // EditorResult retains each literal native data frame. Responses are cumulative
 // snapshots, not patches to concatenate. Only the final response may be applied.
 type EditorResult struct {
-	Kind                 string            `json:"kind"`
-	Status               string            `json:"status"` // edit, jump, filtered, empty, no_suggestion, incomplete
-	Response             *EditorResponse   `json:"response,omitempty"`
-	Frames               []json.RawMessage `json:"frames"`
-	Terminal             json.RawMessage   `json:"terminal,omitempty"`
-	SourceSHA256         string            `json:"source_sha256"`
-	EngineVersion        string            `json:"engine_version"`
-	LatencyMS            int64             `json:"latency_ms"`
-	Usage                string            `json:"usage"` // UNKNOWN: this RPC does not report token usage
-	RequestedModel       string            `json:"requested_model"`
-	RequestedNativeModel string            `json:"requested_native_model"`
+	Kind                 string             `json:"kind"`
+	Status               string             `json:"status"` // edit, jump, filtered, empty, no_suggestion, incomplete
+	Response             *EditorResponse    `json:"response,omitempty"`
+	Frames               []json.RawMessage  `json:"frames"`
+	Terminal             json.RawMessage    `json:"terminal,omitempty"`
+	SourceSHA256         string             `json:"source_sha256"`
+	EngineVersion        string             `json:"engine_version"`
+	LatencyMS            int64              `json:"latency_ms"`
+	Usage                string             `json:"usage"` // UNKNOWN: this RPC does not report token usage
+	RequestedModel       string             `json:"requested_model"`
+	RequestedNativeModel string             `json:"requested_native_model"`
+	Preparation          *EditorPreparation `json:"preparation,omitempty"`
+}
+
+// EditorSnapshot records an actual snapshot supplied by Sync, never an invented
+// edit. ObservedAt is retained when an unchanged document is synchronized again.
+type EditorSnapshot struct {
+	Document   EditorDocument `json:"document"`
+	ObservedAt time.Time      `json:"observed_at"`
+}
+type EditorPreparation struct {
+	Mode                 string            `json:"mode"`
+	ReplayedAt           time.Time         `json:"replayed_at"`
+	Snapshots            []EditorSnapshot  `json:"snapshots"`
+	BootstrapFrames      []json.RawMessage `json:"bootstrap_frames"`
+	BootstrapTerminal    json.RawMessage   `json:"bootstrap_terminal,omitempty"`
+	BootstrapMS          int64             `json:"bootstrap_ms"`
+	BootstrapDocument    Object            `json:"bootstrap_document,omitempty"`
+	BootstrapNativeModel string            `json:"bootstrap_native_model,omitempty"`
 }
 
 // EditorSession owns a dedicated Client/process and synthetic workspace, keeping
@@ -73,6 +91,7 @@ type EditorSession struct {
 	uri, workspace string
 	opened, primed bool
 	sessionID      string
+	history        []EditorSnapshot
 }
 
 func NewEditorSession(config Config) (*EditorSession, error) {
@@ -95,11 +114,14 @@ func validateEditorDocument(d EditorDocument) error {
 	return nil
 }
 func (s *EditorSession) nativeDocument(d EditorDocument) Object {
+	return editorDocumentObject(s.uri, s.workspace, d)
+}
+func editorDocumentObject(uri, workspace string, d EditorDocument) Object {
 	eol := "\n"
 	if strings.Contains(d.Text, "\r\n") {
 		eol = "\r\n"
 	}
-	return Object{"absoluteUri": s.uri, "workspaceUri": s.workspace, "text": d.Text, "editorLanguage": d.Language, "cursorOffset": strconv.Itoa(d.CursorOffset), "lineEnding": eol, "isDirty": true, "timestamp": time.Now().UTC().Format(time.RFC3339Nano)}
+	return Object{"absoluteUri": uri, "workspaceUri": workspace, "text": d.Text, "editorLanguage": d.Language, "cursorOffset": strconv.Itoa(d.CursorOffset), "lineEnding": eol, "isDirty": true, "timestamp": time.Now().UTC().Format(time.RFC3339Nano)}
 }
 
 // Sync records the actual editor snapshot without generating a completion.
@@ -145,6 +167,14 @@ func (s *EditorSession) Sync(parent context.Context, d EditorDocument) error {
 	_, err = e.rpc(ctx, "RefreshContextForIdeAction", Object{"metadata": Object{"sessionId": s.sessionID}, "activeDocument": s.nativeDocument(d), "openDocumentUris": []string{s.uri}, "workspaceUris": []string{s.workspace}, "blocking": true, "ideAction": action})
 	s.client.checkFault(e, err)
 	if err == nil {
+		if len(s.history) == 0 || s.history[len(s.history)-1].Document.Text != d.Text {
+			s.history = append(s.history, EditorSnapshot{Document: d, ObservedAt: time.Now().UTC()})
+			if len(s.history) > 2 {
+				s.history = append([]EditorSnapshot(nil), s.history[len(s.history)-2:]...)
+			}
+		} else {
+			s.history[len(s.history)-1].Document = d
+		}
 		s.document = d
 		s.opened = true
 	}
@@ -157,10 +187,16 @@ func (s *EditorSession) Supercomplete(ctx context.Context, onFrame func(EditorRe
 	return s.complete(ctx, "SUPERCOMPLETE", onFrame)
 }
 
-// TabToJump predicts a zero-based cursor position and may also contain an edit.
-// Call Supercomplete once after Sync to initialize native granular history.
-// This method never hides an extra Supercomplete model call as a warm-up.
+// TabToJump replays the two latest real snapshots in a fresh native context.
+// It requires no previous Supercomplete and has no user-facing edit-age window.
+// A zero-inference context bootstrap is supported on verified native 2.24.0.
 func (s *EditorSession) TabToJump(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
+	return s.replayTabToJump(ctx, onFrame)
+}
+
+// TabToJumpNative exposes the original automatic editor path. It requires a
+// prior Supercomplete and recent edits; use TabToJump for an independent action.
+func (s *EditorSession) TabToJumpNative(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
 	return s.complete(ctx, "TAB_JUMP", onFrame)
 }
 func (s *EditorSession) complete(parent context.Context, kind string, onFrame func(EditorResponse)) (*EditorResult, error) {
@@ -201,7 +237,19 @@ func (s *EditorSession) complete(parent context.Context, kind string, onFrame fu
 	payload := Object{"metadata": Object{"sessionId": s.sessionID}, "document": s.nativeDocument(s.document), "editorOptions": Object{"tabSize": "4", "insertSpaces": true}, "requestSource": "COMMAND_REQUEST_SOURCE_" + kind, "diffType": "DIFF_TYPE_TMP_" + kind, "supercompleteTriggerCondition": "SUPERCOMPLETE_TRIGGER_CONDITION_TYPING", "ignoreSupercompleteDebounce": true}
 	payload["requestedModelId"] = nativeID
 	started := time.Now()
-	err = e.streamRPC(ctx, "HandleStreamingCommand", payload, func(raw json.RawMessage) error {
+	err = receiveEditorResult(ctx, e, payload, r, onFrame)
+	r.LatencyMS = time.Since(started).Milliseconds()
+	s.client.checkFault(e, err)
+	if err != nil {
+		return r, err
+	}
+	if kind == "SUPERCOMPLETE" && len(r.Frames) > 0 {
+		s.primed = true
+	}
+	return r, nil
+}
+func receiveEditorResult(ctx context.Context, e *engine, payload Object, r *EditorResult, onFrame func(EditorResponse)) error {
+	err := e.streamRPC(ctx, "HandleStreamingCommand", payload, func(raw json.RawMessage) error {
 		r.Frames = append(r.Frames, append(json.RawMessage(nil), raw...))
 		var response EditorResponse
 		if err := json.Unmarshal(raw, &response); err != nil {
@@ -213,13 +261,8 @@ func (s *EditorSession) complete(parent context.Context, kind string, onFrame fu
 		}
 		return nil
 	}, &r.Terminal)
-	r.LatencyMS = time.Since(started).Milliseconds()
-	s.client.checkFault(e, err)
 	if err != nil {
-		return r, err
-	}
-	if kind == "SUPERCOMPLETE" && len(r.Frames) > 0 {
-		s.primed = true
+		return err
 	}
 	r.Status = "no_suggestion"
 	switch {
@@ -232,7 +275,7 @@ func (s *EditorSession) complete(parent context.Context, kind string, onFrame fu
 	case hasEditorChanges(r.Response):
 		r.Status = "edit"
 	}
-	return r, nil
+	return nil
 }
 func hasEditorChanges(r *EditorResponse) bool {
 	if r.CharacterDiff != nil {

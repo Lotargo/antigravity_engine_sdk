@@ -1,6 +1,6 @@
 # Antigravity Engine SDK for Go
 
-Нативная Go-версия SDK `0.3.0`. Модуль:
+Нативная Go-версия SDK `0.4.0`. Модуль:
 `github.com/Lotargo/antigravity_engine_sdk/go`. Python и agy CLI не нужны.
 Go 1.23+, для live — установленный Antigravity 2.x с выполненным входом.
 Лицензия AGPL-3.0-only, см. [LICENSE](LICENSE).
@@ -174,7 +174,8 @@ catalog, err := client.RPC(ctx, "GetAvailableModels", nil,
 
 `EditorSession` держит отдельный native процесс и временный workspace.
 `Sync` получает фактические снимки текста, без вызова модели; первая версия
-становится исходной. Реальные файлы проекта API не меняет.
+становится исходной. Последние два различных снимка сохраняются с исходным
+временем наблюдения. Реальные файлы проекта API не меняет.
 
 ```go
 editor, err := ag.NewEditorSession(ag.Config{})
@@ -186,17 +187,17 @@ if err := editor.Sync(ctx, doc); err != nil { log.Fatal(err) }
 doc.Text = "def add(a, b):\n    return \n"
 doc.CursorOffset = len("def add(a, b):\n    return ")
 if err := editor.Sync(ctx, doc); err != nil { log.Fatal(err) }
+jump, err := editor.TabToJump(ctx, nil) // независимо от Supercomplete и возраста правки
+if err != nil { log.Fatal(err) }
+if jump.Status == "jump" {
+    fmt.Println(jump.Response.JumpPosition.Row, jump.Response.JumpPosition.Col)
+}
 edit, err := editor.Supercomplete(ctx, nil)
 if err != nil { log.Fatal(err) }
 // Проверенный предпросмотр: без записи на диск и автоматического применения.
 preview, previewErr := edit.Preview(doc.Text)
 _ = preview
 _ = previewErr // filtered/no-op/empty не являются применимой правкой
-jump, err := editor.TabToJump(ctx, nil)
-if err != nil { log.Fatal(err) }
-if jump.Status == "jump" {
-    fmt.Println(jump.Response.JumpPosition.Row, jump.Response.JumpPosition.Col)
-}
 ```
 
 `CursorOffset` — байты UTF-8, позиция на границе символа. `JumpPosition`
@@ -206,8 +207,23 @@ if jump.Status == "jump" {
 окончания строк, отклоняет неизвестные изменения и устаревший исходник.
 Не применяйте промежуточные кадры: они являются растущими снимками результата.
 
-Перед первым `TabToJump` нужен явный `Supercomplete`: `TYPING` в этом запросе
-инициализирует granular history native 2.24. Скрытого model warm-up нет.
+`TabToJump` работает отдельно: на каждый вызов создаётся временный движок,
+подготавливается контекст без генерации Supercomplete, затем воспроизводятся
+два последних реальных снимка и выполняется один запрос к Tab-to-Jump модели.
+Оригинальные даты наблюдения сохраняются в `Preparation.Snapshots`; время
+загрузки контекста — в `Preparation.ReplayedAt`. Это повторная загрузка
+сохранённого контекста, а не новые действия пользователя. Технический пустой
+документ подготовки отделён от пользовательского кода в отчёте.
+
+Путь проверен на native **2.24.0**. Для других версий независимый вызов возвращает
+`unsupported_editor_version` до bootstrap: порядок внутренней инициализации
+и фильтра нельзя предполагать стабильным. Неожиданный data frame подготовки
+тоже останавливает вызов. Raw bootstrap frames/terminal сохраняются отдельно
+от кадров Tab-to-Jump. Дополнительной генерации Supercomplete нет.
+
+`TabToJumpNative` оставляет прежний автоматический путь: для него нужен
+предварительный `Supercomplete`, и действует нативное окно недавней правки.
+`Supercomplete` также сохраняет исходное автоматическое поведение.
 Команды запрашивают `tab_flash_lite_preview` / `tab_jump_flash_lite_preview`:
 native ID каждый раз читается из свежего каталога, сохраняется в
 `RequestedModel` / `RequestedNativeModel` и передаётся в requestedModelId.
@@ -219,7 +235,9 @@ native ID каждый раз читается из свежего катало�
 
 Ручной стенд: `go run ./testbench --live --ui --listen 127.0.0.1:8767`,
 затем `/editor`. CLI-проба: `go run ./testbench --live --case editor`.
-Подробности проверок: [EDITOR-VALIDATION-2026-10-21.md](EDITOR-VALIDATION-2026-10-21.md).
+Проверка независимого перехода после паузы:
+`go run ./testbench --live --case jump --editor-idle 65s`.
+Подробности: [INDEPENDENT-JUMP-2026-10-21.md](INDEPENDENT-JUMP-2026-10-21.md).
 
 ## Диагностика и границы
 

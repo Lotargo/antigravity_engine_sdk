@@ -92,7 +92,7 @@ func TestEditorSessionProtocol(t *testing.T) {
 		_, _ = io.WriteString(w, `{}`)
 	})
 	ctx := context.Background()
-	_, err := s.TabToJump(ctx, nil)
+	_, err := s.TabToJumpNative(ctx, nil)
 	requireCode(t, err, "editor_not_ready")
 	for _, text := range []string{"old", "a"} {
 		if err = s.Sync(ctx, EditorDocument{Name: "test.py", Language: "python", Text: text, CursorOffset: len(text)}); err != nil {
@@ -110,7 +110,7 @@ func TestEditorSessionProtocol(t *testing.T) {
 	if err != nil || p != "ab" {
 		t.Fatal(p, err)
 	}
-	r, err = s.TabToJump(ctx, nil)
+	r, err = s.TabToJumpNative(ctx, nil)
 	if err != nil || r.Status != "jump" || r.Response.JumpPosition.Row != 0 {
 		t.Fatalf("%+v %v", r, err)
 	}

@@ -40,7 +40,8 @@ type report struct {
 func main() { mockengine.MaybeRun(); os.Exit(run()) }
 func run() int {
 	live := flag.Bool("live", false, "use installed Antigravity; generation cases make real model calls")
-	selected := flag.String("case", "all", "all, catalog, text, plain, schema, vision, cancel, image, editor")
+	selected := flag.String("case", "all", "all, catalog, text, plain, schema, vision, cancel, image, editor, jump")
+	editorIdle := flag.Duration("editor-idle", 0, "idle after syncing real snapshots before --case jump")
 	model := flag.String("model", "gemini-3.8-flash-low", "exact native catalog ID (text/planner)")
 	expected := flag.String("expected-image-model", "", "assert actual image model; does not select it")
 	output := flag.String("output", "", "new report directory; refuses existing paths")
@@ -49,7 +50,11 @@ func run() int {
 	ui := flag.Bool("ui", false, "serve the local browser interface")
 	listen := flag.String("listen", "127.0.0.1:8765", "loopback address for --ui")
 	flag.Parse()
-	valid := map[string]bool{"all": true, "catalog": true, "text": true, "plain": true, "schema": true, "vision": true, "cancel": true, "image": true, "editor": true}
+	valid := map[string]bool{"all": true, "catalog": true, "text": true, "plain": true, "schema": true, "vision": true, "cancel": true, "image": true, "editor": true, "jump": true}
+	if *editorIdle < 0 {
+		fmt.Fprintln(os.Stderr, "--editor-idle must not be negative")
+		return 2
+	}
 	if !valid[*selected] {
 		fmt.Fprintln(os.Stderr, "unknown --case")
 		return 2
@@ -94,12 +99,12 @@ func run() int {
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if *selected == "editor" {
+	if *selected == "editor" || *selected == "jump" {
 		if !*live {
-			fmt.Fprintln(os.Stderr, "--case editor requires --live (real native editor inference)")
+			fmt.Fprintln(os.Stderr, "--case editor/jump requires --live (real native editor inference)")
 			return 2
 		}
-		return runEditorScenario(ctx, config, *output)
+		return runEditorScenario(ctx, config, *output, *selected == "jump", *editorIdle)
 	}
 	if *ui {
 		return serveUI(ctx, client, mode, *model, *listen, *output, config)

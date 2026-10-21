@@ -21,7 +21,7 @@ func editorExample() (string, string, int) {
 	after := strings.Replace(before, "tax_rate", "vat_rate", 1)
 	return before, after, strings.Index(after, "vat_rate") + len("vat_rate")
 }
-func runEditorScenario(ctx context.Context, config sdk.Config, output string) int {
+func runEditorScenario(ctx context.Context, config sdk.Config, output string, independent bool, idle time.Duration) int {
 	s, err := sdk.NewEditorSession(config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -40,8 +40,25 @@ func runEditorScenario(ctx context.Context, config sdk.Config, output string) in
 		return 1
 	}
 	r := sdk.Object{"date": time.Now().Format("2006-01-02"), "sdk_version": sdk.Version, "before": before, "document": doc, "usage": "UNKNOWN", "model_selection": "native editor configuration; requested catalog ID is not an attribution of actual model"}
+	if idle > 0 {
+		fmt.Printf("Snapshots synced; idle for %s without edits or Supercomplete.\n", idle)
+		started := time.Now()
+		timer := time.NewTimer(idle)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(os.Stderr, ctx.Err())
+			return 1
+		case <-timer.C:
+		}
+		r["idle_ms"] = time.Since(started).Milliseconds()
+	}
 	code := 0
-	for _, kind := range []string{"supercomplete", "tab_jump"} {
+	kinds := []string{"supercomplete", "tab_jump"}
+	if independent {
+		kinds = []string{"tab_jump"}
+	}
+	for _, kind := range kinds {
 		var result *sdk.EditorResult
 		if kind == "supercomplete" {
 			result, err = s.Supercomplete(ctx, nil)

@@ -4,6 +4,7 @@ package mockengine
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,7 +63,27 @@ func run() {
 			return
 		}
 		var payload object
-		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+		streaming := strings.HasPrefix(r.Header.Get("Content-Type"), "application/connect+json")
+		var decodeErr error
+		if streaming {
+			var header [5]byte
+			_, decodeErr = io.ReadFull(r.Body, header[:])
+			if decodeErr == nil {
+				size := binary.BigEndian.Uint32(header[1:])
+				if header[0] != 0 || size > 16*1024*1024 {
+					http.Error(w, "bad frame", 400)
+					return
+				}
+				raw := make([]byte, size)
+				_, decodeErr = io.ReadFull(r.Body, raw)
+				if decodeErr == nil {
+					decodeErr = json.Unmarshal(raw, &payload)
+				}
+			}
+		} else {
+			decodeErr = json.NewDecoder(r.Body).Decode(&payload)
+		}
+		if decodeErr != nil {
 			http.Error(w, "bad JSON", 400)
 			return
 		}
@@ -70,6 +91,10 @@ func run() {
 		defer s.mu.Unlock()
 		method := filepath.Base(r.URL.Path)
 		s.calls[method]++
+		if streaming {
+			s.editorStream(w, r, payload)
+			return
+		}
 		out, status := s.handle(method, payload)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -80,17 +105,71 @@ func run() {
 }
 
 type server struct {
-	mu       sync.Mutex
-	scenario string
-	calls    map[string]int
-	messages map[string]object
-	starts   []object
-	sequence int
-	lastSend object
+	mu              sync.Mutex
+	scenario        string
+	calls           map[string]int
+	messages        map[string]object
+	starts          []object
+	sequence        int
+	lastSend        object
+	editorPrimed    bool
+	editorDocuments []object
+}
+
+func sendFrame(w http.ResponseWriter, flags byte, value object) {
+	raw, _ := json.Marshal(value)
+	var header [5]byte
+	header[0] = flags
+	binary.BigEndian.PutUint32(header[1:], uint32(len(raw)))
+	_, _ = w.Write(header[:])
+	_, _ = w.Write(raw)
+}
+func (s *server) editorStream(w http.ResponseWriter, r *http.Request, p object) {
+	w.Header().Set("Content-Type", "application/connect+json")
+	doc := obj(p["document"])
+	if str(p, "requestSource") == "COMMAND_REQUEST_SOURCE_SUPERCOMPLETE" {
+		if str(doc, "text") != "" || str(doc, "timestamp") != "1970-01-01T00:00:00Z" || doc["cursorOffset"] != "0" || doc["isDirty"] != false {
+			sendFrame(w, 2, object{"error": object{"code": "invalid_argument"}})
+			return
+		}
+		if s.scenario == "editor_bootstrap_data" {
+			sendFrame(w, 0, object{"rawText": "unexpected generation"})
+			sendFrame(w, 2, object{})
+			return
+		}
+		s.editorPrimed = true
+		sendFrame(w, 2, object{})
+		return
+	}
+	if !s.editorPrimed || len(s.editorDocuments) < 2 || str(p, "requestSource") != "COMMAND_REQUEST_SOURCE_TAB_JUMP" || str(p, "requestedModelId") != "MODEL_JUMP" {
+		sendFrame(w, 2, object{"error": object{"code": "failed_precondition"}})
+		return
+	}
+	if s.scenario == "editor_running" {
+		sendFrame(w, 0, object{"completionId": "partial"})
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		return
+	}
+	if s.scenario == "editor_empty" {
+		sendFrame(w, 2, object{})
+		return
+	}
+	response := object{"completionId": "jump", "jumpPosition": object{"row": "0", "col": "0"}, "selectionEndLine": "1", "characterDiff": object{"changes": []any{object{"text": str(doc, "text"), "type": "DIFF_CHANGE_TYPE_UNCHANGED"}, object{"text": "!", "type": "DIFF_CHANGE_TYPE_INSERT"}}}, "requestInfo": object{"testReplay": s.editorDocuments, "testGenerationCalls": object{"supercomplete": 0, "tab_jump": 1}}}
+	if s.scenario == "editor_filtered" {
+		response["filterReason"] = object{"reason": "no useful jump"}
+	}
+	sendFrame(w, 0, response)
+	sendFrame(w, 2, object{})
 }
 
 func (s *server) handle(method string, p object) (object, int) {
 	switch method {
+	case "AddTrackedWorkspace":
+		return object{}, 200
+	case "RefreshContextForIdeAction":
+		s.editorDocuments = append(s.editorDocuments, obj(p["activeDocument"]))
+		return object{}, 200
 	case "HasAuthToken":
 		return object{"hasToken": s.scenario != "signed_out"}, 200
 	case "GetAuthStatus":
@@ -105,6 +184,10 @@ func (s *server) handle(method string, p object) (object, int) {
 		if s.scenario == "catalog_changed" {
 			delete(cards, "text-only")
 			cards["new-model"] = object{"model": "MODEL_NEW", "providerFlag": true}
+		}
+		if strings.HasPrefix(s.scenario, "editor_") {
+			cards["tab_flash_lite_preview"] = object{"model": "MODEL_TAB"}
+			cards["tab_jump_flash_lite_preview"] = object{"model": "MODEL_JUMP"}
 		}
 		return object{"response": object{"models": cards}}, 200
 	case "StartCascade":

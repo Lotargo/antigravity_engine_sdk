@@ -47,7 +47,7 @@ vision PNG и image artifacts. Стенд пишет PASS/FAIL и возвращ
 при ошибке — последний доступный trajectory snapshot. Cancelled usage — UNKNOWN.
 
 Флаги: `go run ./testbench --help` из `go/`.
-`--case catalog|text|plain|schema|vision|cancel|image|editor|all`, `--model`,
+`--case catalog|text|plain|schema|vision|cancel|image|editor|jump|all`, `--model`,
 `--expected-image-model`, `--timeout 180s`, `--executable`, `--output <new-dir>`.
 
 Сборка самостоятельного Windows exe:
@@ -73,11 +73,14 @@ go run ./testbench --live --case plain --model tab_jump_flash_lite_preview
 
 ```powershell
 go run ./testbench --live --case editor
+go run ./testbench --live --case jump --editor-idle 65s
 go run ./testbench --live --ui --listen 127.0.0.1:8767
 ```
 
 Страница `http://127.0.0.1:8767/editor` доступна в LIVE. Загрузите пример,
-запомните исходную версию, нажмите Supercomplete, затем Tab-to-Jump.
+запомните исходную версию, нажмите Tab-to-Jump. В Go 0.4.0 он работает отдельно,
+без предварительной генерации Supercomplete и ограничения по возрасту правки.
+Подготовка временного контекста занимает несколько секунд.
 Пример переименовывает объявление `tax_rate` в `vat_rate`, оставляя использование
 на 29-й строке: здесь native может предложить удалённый переход и правку.
 Необязательно принимать первую подсказку Supercomplete: модель иногда предлагает
@@ -85,9 +88,14 @@ go run ./testbench --live --ui --listen 127.0.0.1:8767
 можно только кнопками. Текущий текст перед запросом синхронизируется с сессией.
 Результат исчезает как применимый после редактирования текста.
 
-Инициализация истории не делает model calls; каждая команда делает один вызов.
+Инициализация истории не делает model calls; каждая команда делает один вызов
+модели. Подготовительный native RPC с source SUPERCOMPLETE на отдельном пустом
+служебном документе завершается до inference; кадры подготовки сохраняются
+отдельно. Этот путь проверен на native 2.24.0, другие версии отклоняются до него.
 Команды запрашивают соответствующие tab preview ID из свежего каталога;
 реальный backend остаётся под управлением native. `--model` относится к чату.
 При отмене и в успешном editor RPC usage остаётся UNKNOWN. JSON отчёт каждой
 команды сохраняет исходный снимок, все data frames, terminal frame и статус.
 CLI `editor` пишет `editor-report.json`. Он не входит в `all` и требует `--live`.
+`jump` использует тот же отчёт, не запускает Supercomplete; `--editor-idle`
+задаёт реальное ожидание после Sync обоих снимков перед запросом.
