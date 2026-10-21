@@ -9,7 +9,7 @@ async function api(path, body) {
   return value;
 }
 function controls() {
-  for (const id of ['example', 'completion-example', 'setup', 'baseline', 'code']) $(id).disabled = busy;
+  for (const id of ['code-file', 'language', 'example', 'completion-example', 'setup', 'baseline', 'code']) $(id).disabled = busy;
   $('supercomplete').disabled = busy || !ready;
   $('jump').disabled = busy || !ready;
   $('cancel').disabled = !busy || !commandActive;
@@ -23,17 +23,42 @@ function cursor() {
   controls();
 }
 function documentValue(text) {
-  return {name:'sample.py', language:'python', text, cursor_offset: new TextEncoder().encode(text.slice(0,$('code').selectionStart)).length};
+  return {name:$('filename').value, language:$('language').value, text, cursor_offset: new TextEncoder().encode(text.slice(0,$('code').selectionStart)).length};
 }
 function failure(error) { $('error').textContent = error.message; busy = false; commandActive=false; controls(); }
+function loadDocument(name, language, before, after, offset) {
+  $('filename').value=name; $('language').value=language;
+  $('baseline').value=before; $('code').value=after; $('code').setSelectionRange(offset,offset);
+  ready=false;latest=null;$('error').textContent='';$('preview').value='';$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';
+  $('outcome').textContent='Правка появится после завершения потока.';
+  $('status').textContent=`Загружен ${name}. Нажмите «Запомнить исходную версию».`;cursor();
+}
+const fileLanguages = {py:'python',pyw:'python',go:'go',js:'javascript',mjs:'javascript',cjs:'javascript',jsx:'javascriptreact',ts:'typescript',mts:'typescript',cts:'typescript',tsx:'typescriptreact',rs:'rust',java:'java',c:'c',h:'c',cc:'cpp',cpp:'cpp',cxx:'cpp',hpp:'cpp',cs:'csharp',rb:'ruby',php:'php',swift:'swift',kt:'kotlin',kts:'kotlin',dart:'dart',html:'html',htm:'html',css:'css',scss:'scss',json:'json',yaml:'yaml',yml:'yaml',sql:'sql',sh:'shellscript',bash:'shellscript',zsh:'shellscript',ps1:'powershell',psm1:'powershell',md:'markdown'};
+$('code-file').onchange = async () => {
+  const file=$('code-file').files[0];if(!file)return;
+  busy=true;controls();$('error').textContent='';$('code-file').removeAttribute('aria-invalid');
+  try {
+    if(file.size>4*1024*1024)throw new Error('Файл слишком большой. Максимальный размер — 4 МиБ.');
+    let text;
+    try {text=new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer());}
+    catch(e) {throw new Error('Не удалось прочитать файл как UTF-8. Сохраните текст в UTF-8 и выберите его снова.');}
+    if(text.includes('\0'))throw new Error('В файле есть нулевые байты. Выберите текстовый файл кода UTF-8.');
+    const extension=file.name.split('.').at(-1).toLowerCase();
+    loadDocument(file.name,Object.hasOwn(fileLanguages,extension) ? fileLanguages[extension] : 'plaintext',text,text,0);
+  } catch(e) {$('code-file').setAttribute('aria-invalid','true');failure(e);}
+  finally {$('code-file').value='';busy=false;controls();}
+};
+$('language').onchange = () => {ready=false;latest=null;controls();$('status').textContent='Язык изменён. Нажмите «Запомнить исходную версию».';};
 async function loadExample(kind) {
-  try {const v = await api('example?kind=' + kind); $('baseline').value = v.before; $('code').value = v.after; $('code').setSelectionRange(v.cursor,v.cursor); ready=false;latest=null;$('status').textContent='Пример загружен. Нажмите «Запомнить исходную версию».';cursor();} catch(e){failure(e);}
+  busy=true;controls();
+  try {const v = await api('example?kind=' + kind); loadDocument('sample.py','python',v.before,v.after,v.cursor);$('code-file').removeAttribute('aria-invalid');} catch(e){failure(e);}
+  finally {busy=false;controls();}
 }
 $('example').onclick = () => loadExample('tab_jump');
 $('completion-example').onclick = () => loadExample('supercomplete');
 $('setup').onclick = async () => {
   busy=true;latest=null;controls();$('error').textContent='';$('status').textContent='Создаю сессию и историю исходного текста…';
-  try {await api('setup',{name:'sample.py',language:'python',text:$('baseline').value,cursor_offset:0});ready=true;$('status').textContent='Сессия готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.';busy=false;controls();} catch(e){failure(e);}
+  try {await api('setup',{...documentValue($('baseline').value),cursor_offset:0});ready=true;$('status').textContent='Сессия готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.';busy=false;controls();} catch(e){ready=false;failure(e);}
 };
 async function run(kind) {
   busy=true;commandActive=true;latest=null;sentText=$('code').value;controls();$('error').textContent='';$('preview').value='';$('diff').textContent='—';$('outcome').textContent='Ожидание нативного потока…';$('status').textContent='Запрос выполняется…';

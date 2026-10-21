@@ -4,16 +4,20 @@
 <body><main>
 <header><div><p class="eyebrow">ANTIGRAVITY · GO SDK</p><h1>Supercomplete и Tab-to-Jump</h1><p>Нативные правки и переход курсора. Все изменения остаются в этом редакторе.</p></div><a href="/">Чат и изображения</a></header>
 <section class="card">
-<p>1. Загрузите пример Python и запомните исходную версию. 2. Измените код или оставьте подготовленное переименование. 3. Запустите Supercomplete или Tab-to-Jump, когда удобно. Команды независимы.</p>
+<p>1. Выберите свой файл кода или загрузите пример. 2. Запомните исходную версию и установите курсор в текущем коде. 3. Запустите Supercomplete или Tab-to-Jump. Менять код перед запросом необязательно.</p>
 <p>Обе команды используют сохранённые снимки кода и работают после паузы, без новой правки. Подготовка контекста занимает несколько секунд. Модель может вернуть пустой результат или отфильтровать подсказку.</p>
 <p>Каждая команда запускает реальную генерацию. Модель выбирает native-конфигурация редактора; расход токенов этот RPC не сообщает.</p>
+<label for="code-file">Загрузить свой файл кода</label><input id="code-file" type="file" aria-describedby="file-help error">
+<p id="file-help">Текстовый файл UTF-8 до 4 МиБ. Текст загрузится в обе версии; исходный файл на диске не изменяется. К модели код отправляется только при запуске команды.</p>
+<div class="editor-file-info"><div><label for="filename">Имя файла</label><input id="filename" value="sample.py" readonly></div><div><label for="language">Язык кода</label><select id="language" aria-describedby="language-help"><option value="python">Python</option><option value="go">Go</option><option value="javascript">JavaScript</option><option value="javascriptreact">JavaScript React (JSX)</option><option value="typescript">TypeScript</option><option value="typescriptreact">TypeScript React (TSX)</option><option value="rust">Rust</option><option value="java">Java</option><option value="c">C</option><option value="cpp">C++</option><option value="csharp">C#</option><option value="ruby">Ruby</option><option value="php">PHP</option><option value="swift">Swift</option><option value="kotlin">Kotlin</option><option value="dart">Dart</option><option value="html">HTML</option><option value="css">CSS</option><option value="scss">SCSS</option><option value="json">JSON</option><option value="yaml">YAML</option><option value="sql">SQL</option><option value="shellscript">Shell</option><option value="powershell">PowerShell</option><option value="markdown">Markdown</option><option value="plaintext">Обычный текст</option></select></div></div>
+<p id="language-help">Язык определяется по расширению. При необходимости измените его до инициализации сессии.</p>
 <div class="actions"><button id="completion-example" type="button">Загрузить пример дополнения</button><button id="example" type="button">Загрузить пример переименования</button><button id="setup" type="button">Запомнить исходную версию</button></div>
 <label for="baseline">Исходная версия</label><textarea id="baseline" rows="7" spellcheck="false" aria-describedby="baseline-help"></textarea>
 <p id="baseline-help">Нужна для истории изменений. При инициализации запрос к модели не отправляется.</p>
 <label for="code">Текущий код</label><textarea id="code" rows="15" spellcheck="false" aria-describedby="cursor status"></textarea>
 <p id="cursor">Курсор: —</p>
 <div class="actions"><button id="supercomplete" type="button" disabled>Supercomplete</button><button id="jump" type="button" disabled>Tab-to-Jump</button><button id="cancel" type="button" disabled>Отменить запрос</button></div>
-<p id="status" role="status" aria-live="polite">Сессия ещё не создана. Начните с примера.</p>
+<p id="status" role="status" aria-live="polite">Сессия ещё не создана. Выберите файл или пример.</p>
 <p id="error" role="alert"></p>
 </section>
 <section class="card"><h2>Результат</h2><p id="outcome">Правка появится после завершения потока.</p><div class="actions"><button id="apply" type="button" disabled>Применить правку к текущему коду</button><button id="move" type="button" disabled>Перейти к позиции курсора</button></div><h3>Правка кода</h3><pre id="diff">—</pre><label for="preview">Код после правки</label><textarea id="preview" rows="8" readonly spellcheck="false"></textarea><details><summary>Нативный ответ и отчёт</summary><pre id="raw"></pre><p id="report"></p></details></section>
