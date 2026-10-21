@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="testbench-token"]').content;
-let ready = false, busy = false, commandActive = false, latest = null, sentText = '', poll;
+let ready = false, busy = false, commandActive = false, hasDocument = false, latest = null, sentText = '', poll;
 async function api(path, body) {
   const response = await fetch('/api/editor/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {'X-Testbench-Token': token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const value = await response.json();
@@ -13,6 +13,7 @@ function controls() {
   $('supercomplete').disabled = busy || !ready;
   $('jump').disabled = busy || !ready;
   $('cancel').disabled = !busy || !commandActive;
+  $('download').disabled = busy || !hasDocument;
   const valid = !busy && latest && $('code').value === sentText;
   $('apply').disabled = !valid || latest.preview === undefined || latest.preview === sentText;
   $('move').disabled = !valid || !latest.result?.response?.jumpPosition || latest.result?.status !== 'jump';
@@ -27,6 +28,7 @@ function documentValue(text) {
 }
 function failure(error) { $('error').textContent = error.message; busy = false; commandActive=false; controls(); }
 function loadDocument(name, language, before, after, offset) {
+  hasDocument=true;$('download-status').textContent='';
   $('filename').value=name; $('language').value=language;
   $('baseline').value=before; $('code').value=after; $('code').setSelectionRange(offset,offset);
   ready=false;latest=null;$('error').textContent='';$('preview').value='';$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';
@@ -79,7 +81,16 @@ async function refresh() {
 }
 $('supercomplete').onclick=()=>run('supercomplete');$('jump').onclick=()=>run('tab_jump');
 $('cancel').onclick=async()=>{try{await api('cancel',{});}catch(e){failure(e);}};
-$('apply').onclick=()=>{if($('code').value!==sentText)return;$('code').value=latest.preview;latest=null;cursor();$('status').textContent='Правка применена в редакторе. Следующая команда запишет новый снимок.';};
+$('apply').onclick=()=>{if($('code').value!==sentText)return;$('code').value=latest.preview;latest=null;cursor();$('status').textContent='Правка применена в редакторе. Можно скачать текущий файл.';};
+$('download').onclick=()=>{
+  if(busy || !hasDocument)return;
+  const url=URL.createObjectURL(new Blob([$('code').value],{type:'text/plain;charset=utf-8'}));
+  const link=document.createElement('a');link.href=url;link.download=$('filename').value;
+  document.body.appendChild(link);
+  try {link.click();$('download-status').textContent=`Скачивание ${link.download} начато.`;}
+  finally {link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+};
 $('move').onclick=()=>{if($('code').value!==sentText)return;const j=latest.result.response.jumpPosition,lines=sentText.split('\n'),row=Number(j.row||0),col=Number(j.col||0);if(row>=lines.length||col>lines[row].length){$('error').textContent='Позиция вне текущего текста.';return;}const offset=lines.slice(0,row).reduce((n,line)=>n+line.length+1,0)+col;$('code').focus();$('code').setSelectionRange(offset,offset);const lineHeight=parseFloat(getComputedStyle($('code')).lineHeight);$('code').scrollTop=Math.max(0,row*lineHeight-$('code').clientHeight/2);cursor();};
 for(const event of ['input','click','keyup','select'])$('code').addEventListener(event,cursor);
+$('code').addEventListener('input',()=>{hasDocument=true;$('download-status').textContent='';controls();});
 controls();
