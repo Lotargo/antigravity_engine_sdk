@@ -14,6 +14,9 @@
 Откройте `http://127.0.0.1:8765`: свежий каталог моделей, промпт, одно изображение
 с предпросмотром и отмена активного запроса. Generations запускаются только кнопкой.
 Можно обновлять каталог во время генерации. После отмены доступен следующий запрос.
+Для `tab_*` выберите формат **«Обычный текст»**. Этот режим вызывает
+`Client.Complete` без инструментов/finish. Формат «Структурированный (finish)»
+сохраняет прежний контракт Chat. Автоматических переключений или fallback нет.
 Ответ, native usage и JSON-отчёт доступны в правой панели; отчёты сохраняются
 в новом `go/reports/` каталоге. `--listen 127.0.0.1:8766` выбирает другой порт.
 Для mock UI: `run.ps1 --ui`. При перезагрузке страницы состояние последнего
@@ -44,7 +47,7 @@ vision PNG и image artifacts. Стенд пишет PASS/FAIL и возвращ
 при ошибке — последний доступный trajectory snapshot. Cancelled usage — UNKNOWN.
 
 Флаги: `go run ./testbench --help` из `go/`.
-`--case catalog|text|schema|vision|cancel|image|all`, `--model`,
+`--case catalog|text|plain|schema|vision|cancel|image|all`, `--model`,
 `--expected-image-model`, `--timeout 180s`, `--executable`, `--output <new-dir>`.
 
 Сборка самостоятельного Windows exe:
@@ -58,3 +61,10 @@ vision PNG и image artifacts. Стенд пишет PASS/FAIL и возвращ
 EXE не требует Go/Python. Для live нужен Antigravity 2.x с выполненным входом.
 Прямой запуск exe сохраняет `reports/` относительно текущей папки;
 `run.ps1` запускает из папки `go/`.
+
+Проверка tab-моделей через CLI из папки `go/`:
+
+```powershell
+go run ./testbench --live --case plain --model tab_flash_lite_preview
+go run ./testbench --live --case plain --model tab_jump_flash_lite_preview
+```

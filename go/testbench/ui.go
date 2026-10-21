@@ -27,23 +27,24 @@ import (
 var uiAssets embed.FS
 
 type uiJob struct {
-	ID          string      `json:"id"`
-	Mode        string      `json:"mode"`
-	SDKVersion  string      `json:"sdk_version"`
-	Status      string      `json:"status"`
-	Phase       string      `json:"phase"`
-	Model       string      `json:"model"`
-	Prompt      string      `json:"prompt"`
-	Attachment  string      `json:"attachment,omitempty"`
-	StartedAt   time.Time   `json:"started_at"`
-	DurationMS  int64       `json:"duration_ms"`
-	Result      *sdk.Result `json:"result,omitempty"`
-	Error       *sdk.Error  `json:"error,omitempty"`
-	Trajectory  sdk.Object  `json:"partial_trajectory,omitempty"`
-	Report      string      `json:"report,omitempty"`
-	ReportError string      `json:"report_error,omitempty"`
-	UsageNote   string      `json:"usage_note"`
-	cancel      context.CancelFunc
+	ID           string      `json:"id"`
+	Mode         string      `json:"mode"`
+	SDKVersion   string      `json:"sdk_version"`
+	Status       string      `json:"status"`
+	Phase        string      `json:"phase"`
+	Model        string      `json:"model"`
+	Prompt       string      `json:"prompt"`
+	Attachment   string      `json:"attachment,omitempty"`
+	StartedAt    time.Time   `json:"started_at"`
+	DurationMS   int64       `json:"duration_ms"`
+	Result       *sdk.Result `json:"result,omitempty"`
+	Error        *sdk.Error  `json:"error,omitempty"`
+	Trajectory   sdk.Object  `json:"partial_trajectory,omitempty"`
+	Report       string      `json:"report,omitempty"`
+	ReportError  string      `json:"report_error,omitempty"`
+	UsageNote    string      `json:"usage_note"`
+	ResponseMode string      `json:"response_mode"`
+	cancel       context.CancelFunc
 }
 type uiServer struct {
 	client                     *sdk.Client
@@ -229,6 +230,14 @@ func (a *uiServer) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.MultipartForm.RemoveAll()
 	prompt, model := r.FormValue("prompt"), r.FormValue("model")
+	responseMode := r.FormValue("response_mode")
+	if responseMode == "" {
+		responseMode = "finish"
+	}
+	if responseMode != "finish" && responseMode != "text" {
+		apiError(w, 400, fmt.Errorf("Unknown response mode"))
+		return
+	}
 	if strings.TrimSpace(prompt) == "" || strings.TrimSpace(model) == "" {
 		apiError(w, 400, fmt.Errorf("Prompt and model are required"))
 		return
@@ -267,7 +276,7 @@ func (a *uiServer) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
-	job := &uiJob{ID: randomID(), Mode: a.mode, SDKVersion: sdk.Version, Status: "running", Phase: "starting", Model: model, Prompt: prompt, Attachment: attachment, StartedAt: time.Now(), UsageNote: "UNKNOWN until a completed native result is available", cancel: cancel}
+	job := &uiJob{ID: randomID(), Mode: a.mode, SDKVersion: sdk.Version, ResponseMode: responseMode, Status: "running", Phase: "starting", Model: model, Prompt: prompt, Attachment: attachment, StartedAt: time.Now(), UsageNote: "UNKNOWN until a completed native result is available", cancel: cancel}
 	a.job = job
 	a.wg.Add(1)
 	snapshot := a.snapshotLocked()
@@ -278,14 +287,21 @@ func (a *uiServer) submit(w http.ResponseWriter, r *http.Request) {
 func (a *uiServer) generate(ctx context.Context, job *uiJob, media []sdk.Media) {
 	defer a.wg.Done()
 	defer job.cancel()
-	result, err := a.client.Chat(ctx, sdk.Request{Prompt: job.Prompt, Model: job.Model, Media: media, OnProgress: func(p sdk.ProgressEvent) {
+	request := sdk.Request{Prompt: job.Prompt, Model: job.Model, Media: media, OnProgress: func(p sdk.ProgressEvent) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		job.Phase = p.Phase
 		if p.Trajectory != nil {
 			job.Trajectory = p.Trajectory
 		}
-	}})
+	}}
+	var result *sdk.Result
+	var err error
+	if job.ResponseMode == "text" {
+		result, err = a.client.Complete(ctx, request)
+	} else {
+		result, err = a.client.Chat(ctx, request)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	job.DurationMS = time.Since(job.StartedAt).Milliseconds()

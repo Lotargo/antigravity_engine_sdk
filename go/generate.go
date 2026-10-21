@@ -27,7 +27,17 @@ func (c *Client) Chat(ctx context.Context, request Request) (*Result, error) {
 	return c.Generate(ctx, request)
 }
 func (c *Client) Generate(ctx context.Context, request Request) (*Result, error) {
-	return c.execute(ctx, request, false, "")
+	return c.execute(ctx, request, false, "", false)
+}
+
+// Complete returns native planner text with no tools or JSON Schema. This is
+// an explicit contract for models that do not support the finish tool. It is
+// never used as a fallback for a failed Chat/Generate call.
+func (c *Client) Complete(ctx context.Context, request Request) (*Result, error) {
+	if request.Schema != nil {
+		return nil, fault("invalid_input", "Complete does not accept Schema; use Generate for structured output.", nil)
+	}
+	return c.execute(ctx, request, false, "", true)
 }
 func (c *Client) GenerateImage(ctx context.Context, request ImageRequest) (*Result, error) {
 	instructions := "Generate an actual image using generate_image, then call finish with a status string. Do not substitute a description or code for an image."
@@ -35,9 +45,9 @@ func (c *Client) GenerateImage(ctx context.Context, request ImageRequest) (*Resu
 		instructions += " The expected image model is " + request.ExpectedModel + "."
 	}
 	r := Request{Prompt: request.Prompt, Model: request.Planner, Schema: Object{"type": "object", "properties": Object{"status": Object{"type": "string"}}, "required": []string{"status"}, "additionalProperties": false}, Instructions: instructions, Media: request.Media, Thinking: request.Thinking, MaxInvocations: 5, OnProgress: request.OnProgress}
-	return c.execute(ctx, r, true, request.ExpectedModel)
+	return c.execute(ctx, r, true, request.ExpectedModel, false)
 }
-func (c *Client) execute(parent context.Context, r Request, imageGeneration bool, expectedModel string) (result *Result, err error) {
+func (c *Client) execute(parent context.Context, r Request, imageGeneration bool, expectedModel string, plainText bool) (result *Result, err error) {
 	started := time.Now()
 	ctx, cancel, err := c.requestContext(parent)
 	if err != nil {
@@ -54,10 +64,20 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 	}
 	if r.MaxInvocations == 0 {
 		r.MaxInvocations = 3
+		if plainText {
+			r.MaxInvocations = 1
+		}
 	}
-	schema, validator, err := compileSchema(r.Schema)
-	if err != nil {
-		return nil, err
+	// Complete has no schema or implicit finish requirement.
+	var validate func(any) error
+	var schema Object
+	if !plainText {
+		compiledSchema, validator, compileErr := compileSchema(r.Schema)
+		if compileErr != nil {
+			return nil, compileErr
+		}
+		schema = compiledSchema
+		validate = validator.Validate
 	}
 	attachments := make([]any, 0, len(r.Media))
 	for _, m := range r.Media {
@@ -99,6 +119,9 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 		return nil, err
 	}
 	tools := []string{"finish"}
+	if plainText {
+		tools = []string{}
+	}
 	if imageGeneration {
 		tools = []string{"generate_image", "finish"}
 	}
@@ -121,7 +144,10 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 			}
 		}
 	}()
-	toolConfig := Object{"finish": Object{"resultJsonSchemaString": marshal(schema)}, "autoInteractionBehavior": "AUTO_INTERACTION_BEHAVIOR_DENY_ALL"}
+	toolConfig := Object{"autoInteractionBehavior": "AUTO_INTERACTION_BEHAVIOR_DENY_ALL"}
+	if !plainText {
+		toolConfig["finish"] = Object{"resultJsonSchemaString": marshal(schema)}
+	}
 	if imageGeneration {
 		toolConfig["generateImage"] = Object{"forceDisable": false, "outputDirectory": generated, "saveToParentArtifactDirectory": false}
 	}
@@ -130,7 +156,13 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 		planner["completionConfigOverride"] = Object{"thinkingLevel": thinkingLevels[r.Thinking]}
 	}
 	packageText := r.Instructions + "\n\n" + r.Prompt + "\n\nTRANSPORT OUTPUT\nCall finish with the required result object. Use plain text and real line breaks inside field values. Do not return the object as planner prose. Use only the supplied tools."
-	message := Object{"cascadeId": cascade, "items": []any{Object{"text": packageText}}, "cascadeConfig": Object{"applyModelDefaultOverride": true, "plannerConfig": planner, "executorConfig": Object{"maxGeneratorInvocations": r.MaxInvocations, "requireFinishTool": true}}, "blocking": false}
+	if plainText {
+		packageText = r.Prompt
+		if r.Instructions != "" {
+			packageText = r.Instructions + "\n\n" + r.Prompt
+		}
+	}
+	message := Object{"cascadeId": cascade, "items": []any{Object{"text": packageText}}, "cascadeConfig": Object{"applyModelDefaultOverride": true, "plannerConfig": planner, "executorConfig": Object{"maxGeneratorInvocations": r.MaxInvocations, "requireFinishTool": !plainText}}, "blocking": false}
 	if len(attachments) > 0 {
 		message["media"] = attachments
 	}
@@ -154,16 +186,27 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 			return nil, err
 		}
 	}
-	raw, err := finish(trajectory)
-	if err != nil {
-		return nil, err
-	}
+	var raw string
 	var output Object
-	if err = json.Unmarshal([]byte(raw), &output); err != nil || output == nil {
-		return nil, fault("contract_violation", "Native finish is not a JSON object.", err)
-	}
-	if err = validator.Validate(output); err != nil {
-		return nil, fault("contract_violation", "Native finish violates the requested schema.", err)
+	outputMode := "native_finish"
+	if plainText {
+		raw, err = plannerText(trajectory)
+		if err != nil {
+			return nil, err
+		}
+		output = Object{"text": raw}
+		outputMode = "planner_text"
+	} else {
+		raw, err = finish(trajectory)
+		if err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(raw), &output); err != nil || output == nil {
+			return nil, fault("contract_violation", "Native finish is not a JSON object.", err)
+		}
+		if err = validate(output); err != nil {
+			return nil, fault("contract_violation", "Native finish violates the requested schema.", err)
+		}
 	}
 	steps := list(trajectory, "steps")
 	if len(attachments) > 0 {
@@ -191,7 +234,58 @@ func (c *Client) execute(parent context.Context, r Request, imageGeneration bool
 		}
 	}
 	emit("completed", cascade, nil)
-	return &Result{Output: output, RawOutput: raw, RawResponseSHA256: hash(raw), Trajectory: trajectory, CascadeID: cascade, Model: r.Model, NativeModel: str(card, "model"), EngineVersion: e.installation.Version, LatencyMS: time.Since(started).Milliseconds(), Usage: usage, UsageScope: "trajectory_model_steps", Images: images}, nil
+	return &Result{OutputMode: outputMode, Output: output, RawOutput: raw, RawResponseSHA256: hash(raw), Trajectory: trajectory, CascadeID: cascade, Model: r.Model, NativeModel: str(card, "model"), EngineVersion: e.installation.Version, LatencyMS: time.Since(started).Milliseconds(), Usage: usage, UsageScope: "trajectory_model_steps", Images: images}, nil
+}
+
+func plannerText(trajectory Object) (string, error) {
+	if err := trajectoryError(trajectory); err != nil {
+		return "", err
+	}
+	if err := retiredModel(trajectory); err != nil {
+		return "", err
+	}
+	var parts []string
+	for _, v := range list(trajectory, "steps") {
+		step := object(v)
+		if str(step, "type") != "CORTEX_STEP_TYPE_PLANNER_RESPONSE" {
+			continue
+		}
+		if str(step, "status") == "CORTEX_STEP_STATUS_PENDING" || str(step, "status") == "CORTEX_STEP_STATUS_RUNNING" {
+			continue
+		}
+		text := str(field(step, "plannerResponse"), "response")
+		if strings.TrimSpace(text) != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fault("incompatible_format", "Engine returned no completed planner text.", nil)
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
+func retiredModel(trajectory Object) error {
+	for _, v := range list(trajectory, "steps") {
+		text := strings.ToLower(str(field(object(v), "plannerResponse"), "response"))
+		if strings.Contains(text, "is no longer available") || strings.Contains(text, "is no longer supported") || strings.Contains(text, "has been retired") {
+			return fault("model_unavailable", "Selected model has been retired.", nil)
+		}
+	}
+	return nil
+}
+
+func trajectoryError(trajectory Object) error {
+	for _, v := range list(trajectory, "steps") {
+		s := object(v)
+		if strings.Contains(str(s, "type"), "ERROR") || str(s, "status") == "CORTEX_STEP_STATUS_ERROR" || str(s, "status") == "CORTEX_STEP_STATUS_FAILED" {
+			code := "provider_error"
+			if providerBlock.MatchString(marshal(s["errorMessage"])) {
+				code = "content_rejected"
+			}
+			return &Error{Code: code, Message: "Native request failed.", Details: s["errorMessage"]}
+		}
+	}
+	return nil
 }
 func fileURI(path string) string {
 	s := filepath.ToSlash(path)
@@ -202,15 +296,8 @@ func fileURI(path string) string {
 }
 func finish(trajectory Object) (string, error) {
 	steps := list(trajectory, "steps")
-	for _, v := range steps {
-		s := object(v)
-		if strings.Contains(str(s, "type"), "ERROR") || str(s, "status") == "CORTEX_STEP_STATUS_ERROR" || str(s, "status") == "CORTEX_STEP_STATUS_FAILED" {
-			code := "provider_error"
-			if providerBlock.MatchString(marshal(s["errorMessage"])) {
-				code = "content_rejected"
-			}
-			return "", &Error{Code: code, Message: "Native request failed.", Details: s["errorMessage"]}
-		}
+	if err := trajectoryError(trajectory); err != nil {
+		return "", err
 	}
 	for i := len(steps) - 1; i >= 0; i-- {
 		s := object(steps[i])
@@ -225,12 +312,11 @@ func finish(trajectory Object) (string, error) {
 			}
 		}
 	}
+	if err := retiredModel(trajectory); err != nil {
+		return "", err
+	}
 	for _, v := range steps {
 		message := str(field(object(v), "plannerResponse"), "response")
-		lower := strings.ToLower(message)
-		if strings.Contains(lower, "is no longer available") || strings.Contains(lower, "is no longer supported") || strings.Contains(lower, "has been retired") {
-			return "", fault("model_unavailable", "Selected model has been retired.", nil)
-		}
 		if refusal.MatchString(message) || providerBlock.MatchString(message) {
 			return "", fault("content_rejected", "Model declined the request.", nil)
 		}

@@ -26,6 +26,9 @@
           <button type="button" id="refresh" class="secondary" aria-label="Обновить каталог моделей">Обновить</button>
         </div>
         <p class="hint" id="model-hint">Получаем каталог установленного движка.</p>
+		<label for="response-mode">Формат ответа</label>
+		<select id="response-mode" aria-describedby="mode-hint"><option value="finish">Структурированный (finish)</option><option value="text">Обычный текст</option></select>
+		<p id="mode-hint" class="hint">Для tab_* выберите «Обычный текст»: эти модели не вызывают finish.</p>
         <label for="prompt">Промпт</label>
         <textarea id="prompt" name="prompt" required placeholder="Например: опиши изображение и перечисли основные цвета." aria-describedby="prompt-hint"></textarea>
         <p class="hint" id="prompt-hint">Каждый запрос начинает новую беседу. Ctrl+Enter — отправить.</p>

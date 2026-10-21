@@ -20,6 +20,7 @@ function controls() {
   const card = state.models.find(m => m.id === $('model').value);
   const incompatible = !!(state.file && card && !card.supports_images);
   $('model').disabled = busy || state.refreshing || !state.models.length;
+	$('response-mode').disabled = busy;
   $('refresh').disabled = state.refreshing;
   $('prompt').disabled = busy;
   $('image').disabled = busy;
@@ -66,7 +67,7 @@ function renderJob(job) {
   $('engine').textContent = job.result?.engine_version || '—';
   $('usage').textContent = job.result ? job.result.usage_scope : 'UNKNOWN';
   $('usage-json').textContent = job.result ? JSON.stringify(job.result.usage, null, 2) : 'Расход отменённого или незавершённого запроса неизвестен.';
-  $('result-meta').textContent = [job.model, job.attachment ? `Вложение: ${job.attachment}` : ''].filter(Boolean).join(' · ');
+  $('result-meta').textContent = [job.model, job.response_mode === 'text' ? 'Обычный текст' : 'finish', job.attachment ? `Вложение: ${job.attachment}` : ''].filter(Boolean).join(' · ');
   $('report-note').textContent = job.report_error ? `Отчёт не сохранён: ${job.report_error}` : job.report ? `Сохранён: ${job.report}` : '';
   $('download').disabled = !job.report;
   controls();
@@ -84,6 +85,7 @@ async function poll() {
 }
 $('refresh').addEventListener('click', loadModels);
 $('model').addEventListener('change', controls);
+$('response-mode').addEventListener('change', controls);
 $('prompt').addEventListener('input', controls);
 $('prompt').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('send').disabled) { e.preventDefault(); $('request-form').requestSubmit(); } });
 $('choose-image').addEventListener('click', () => $('image').click());
@@ -109,6 +111,7 @@ $('request-form').addEventListener('submit', async e => {
   viewRevision++;
   state.posting = true; error(); controls();
   const data = new FormData(); data.set('model', $('model').value); data.set('prompt', $('prompt').value);
+	data.set('response_mode',$('response-mode').value);
   if (state.file) data.set('image', state.file);
   try { renderJob(await api('/api/requests', { method: 'POST', body: data })); }
   catch (e) { error(e.message); }
@@ -135,6 +138,7 @@ $('download').addEventListener('click', async () => {
     $('footer').textContent = `Локальный тестовый стенд · Go SDK ${state.config.version} · ${state.config.mode === 'live' ? 'Генерация запускается кнопкой «Отправить запрос»' : 'Ответы mock — тестовые данные'}`;
     renderJob(await api('/api/request'));
     if (state.job) $('prompt').value = state.job.prompt;
+	if (state.job) $('response-mode').value=state.job.response_mode || 'finish';
     await loadModels();
   } catch (e) { error(`Не удалось подключиться: ${e.message}`); }
   finally { state.loading = false; controls(); setInterval(poll, 600); }

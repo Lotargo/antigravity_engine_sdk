@@ -1,6 +1,6 @@
 # Antigravity Engine SDK for Go
 
-Нативная Go-версия SDK `0.1.0`. Модуль:
+Нативная Go-версия SDK `0.2.0`. Модуль:
 `github.com/Lotargo/antigravity_engine_sdk/go`. Python и agy CLI не нужны.
 Go 1.23+, для live — установленный Antigravity 2.x с выполненным входом.
 Лицензия AGPL-3.0-only, см. [LICENSE](LICENSE).
@@ -82,6 +82,31 @@ func main() {
 временный профиль. `Close` терминален.
 
 ## Структура, media и отмена
+
+### Модели без finish: обычный текст
+
+```go
+result, err := client.Complete(ctx, ag.Request{
+    Model: "tab_flash_lite_preview", // Или tab_jump_flash_lite_preview.
+    Prompt: "Complete the Python function. Plain code only:\ndef add(a, b):\n    return ",
+})
+if err != nil { return err }
+text, err := result.Text()
+```
+
+`Complete` явно отключает инструменты, не требует JSON Schema и читает
+завершённый native `plannerResponse.response`. `OutputMode=planner_text`.
+Это самостоятельный контракт; `Chat`/`Generate` по-прежнему требуют native
+`finish`, а автоматического fallback нет. Schema в Complete запрещена.
+Prompt не получает transport hints о finish; default MaxInvocations=1.
+Native текст сохраняется буквально: лишние кавычки, escape-последовательности
+и ошибки сгенерированного кода автоматически не исправляются.
+
+Обе `tab_*` проверены в этом режиме. Это текстовое использование моделей;
+native IDE Supercomplete/Tab-to-Jump с diff/cursor не подтверждены в standalone.
+Подробнее: [TAB-MODELS-2026-10-21.md](TAB-MODELS-2026-10-21.md).
+
+### Структурированный результат
 
 ```go
 media, err := ag.MediaFromFile("photo.png")

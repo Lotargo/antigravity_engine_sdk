@@ -40,7 +40,7 @@ type report struct {
 func main() { mockengine.MaybeRun(); os.Exit(run()) }
 func run() int {
 	live := flag.Bool("live", false, "use installed Antigravity; generation cases make real model calls")
-	selected := flag.String("case", "all", "all, catalog, text, schema, vision, cancel, image")
+	selected := flag.String("case", "all", "all, catalog, text, plain, schema, vision, cancel, image")
 	model := flag.String("model", "gemini-3.8-flash-low", "exact native catalog ID (text/planner)")
 	expected := flag.String("expected-image-model", "", "assert actual image model; does not select it")
 	output := flag.String("output", "", "new report directory; refuses existing paths")
@@ -49,7 +49,7 @@ func run() int {
 	ui := flag.Bool("ui", false, "serve the local browser interface")
 	listen := flag.String("listen", "127.0.0.1:8765", "loopback address for --ui")
 	flag.Parse()
-	valid := map[string]bool{"all": true, "catalog": true, "text": true, "schema": true, "vision": true, "cancel": true, "image": true}
+	valid := map[string]bool{"all": true, "catalog": true, "text": true, "plain": true, "schema": true, "vision": true, "cancel": true, "image": true}
 	if !valid[*selected] {
 		fmt.Fprintln(os.Stderr, "unknown --case")
 		return 2
@@ -143,6 +143,11 @@ func run() int {
 	if *selected == "all" || *selected == "text" {
 		runCheck("text", func() (any, error) {
 			return client.Chat(ctx, sdk.Request{Prompt: "Write one short sentence about a blue ceramic cup.", Model: *model, OnProgress: progress})
+		})
+	}
+	if *selected == "plain" {
+		runCheck("plain-text", func() (any, error) {
+			return client.Complete(ctx, sdk.Request{Prompt: "Compute 17 * 23. Reply with only the number as plain text.", Model: *model, OnProgress: progress})
 		})
 	}
 	if *selected == "all" || *selected == "schema" {

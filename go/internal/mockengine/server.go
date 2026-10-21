@@ -167,6 +167,9 @@ func (s *server) handle(method string, p object) (object, int) {
 		}
 		raw, _ := json.Marshal(output)
 		finish := object{"type": "CORTEX_STEP_TYPE_FINISH", "status": "CORTEX_STEP_STATUS_DONE", "finish": object{"outputString": string(raw)}, "metadata": object{"modelUsage": object{"inputTokens": "17", "outputTokens": "9"}}}
+		if _, structured := tools["finish"]; !structured {
+			finish = object{"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE", "plannerResponse": object{"response": "Native Go SDK plain text answer"}, "metadata": object{"modelUsage": object{"inputTokens": "17", "outputTokens": "9"}}}
+		}
 		switch s.scenario {
 		case "invalid":
 			finish["finish"] = object{"outputString": `{"answer":"wrong"}`}

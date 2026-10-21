@@ -58,11 +58,15 @@ func uiCall(t *testing.T, a *uiServer, s *httptest.Server, method, path string, 
 	return res.StatusCode, data
 }
 func uiSubmit(t *testing.T, a *uiServer, s *httptest.Server, prompt string, image []byte) (int, *uiJob) {
+	return uiSubmitMode(t, a, s, prompt, image, "finish")
+}
+func uiSubmitMode(t *testing.T, a *uiServer, s *httptest.Server, prompt string, image []byte, mode string) (int, *uiJob) {
 	t.Helper()
 	var b bytes.Buffer
 	w := multipart.NewWriter(&b)
 	_ = w.WriteField("model", "mock-low")
 	_ = w.WriteField("prompt", prompt)
+	_ = w.WriteField("response_mode", mode)
 	if image != nil {
 		f, err := w.CreateFormFile("image", "fixture.png")
 		if err != nil {
@@ -79,6 +83,20 @@ func uiSubmit(t *testing.T, a *uiServer, s *httptest.Server, prompt string, imag
 		}
 	}
 	return code, &job
+}
+
+func TestUIExplicitPlainTextMode(t *testing.T) {
+	a, s := testUI(t)
+	if code, _ := uiSubmitMode(t, a, s, "plain", nil, "unknown"); code != 400 {
+		t.Fatal(code)
+	}
+	if code, _ := uiSubmitMode(t, a, s, "plain", nil, "text"); code != 202 {
+		t.Fatal(code)
+	}
+	done := waitJob(t, a, s, func(j *uiJob) bool { return !active(j.Status) })
+	if done.Status != "completed" || done.ResponseMode != "text" || done.Result.OutputMode != "planner_text" {
+		t.Fatal(done)
+	}
 }
 func waitJob(t *testing.T, a *uiServer, s *httptest.Server, predicate func(*uiJob) bool) *uiJob {
 	t.Helper()
