@@ -236,10 +236,13 @@ class Client:
         *,
         timeout: float | None = None,
         cancelled: Callable[[], bool] | None = None,
+        concurrent: bool = False,
     ) -> dict:
         """Escape hatch to native RPC; methods/fields depend on the installed build.
 
         High-level tool restrictions do not apply to arbitrary RPC calls.
+        ``concurrent=True`` lets independent metadata reads use an already
+        running engine during generation. The caller owns native RPC ordering.
         """
         if (
             not isinstance(method, str)
@@ -248,10 +251,41 @@ class Client:
             or not method.isascii()
         ):
             raise AntigravityError("Invalid RPC method name.", code="invalid_input")
-        with self._session(timeout, cancelled) as session:
+        with self._rpc_session(timeout, cancelled, concurrent) as session:
             return session.rpc(
                 method, payload, timeout=self.timeout if timeout is None else timeout
             )
+
+    @contextmanager
+    def _rpc_session(
+        self,
+        timeout: float | None,
+        cancelled: Callable[[], bool] | None,
+        concurrent: bool,
+    ) -> Iterator[runtime.Session]:
+        # Reuse an already running process without acquiring the inference lock.
+        # Cold start still goes through the normal serialized ownership path.
+        budget = self.timeout if timeout is None else _positive(timeout, "timeout")
+        with self._state:
+            if self._closed:
+                raise AntigravityError("Client is closed.", code="client_closed")
+            engine = self._engine
+        if not concurrent or engine is None or not engine.usable():
+            with self._session(budget, cancelled) as session:
+                yield session
+            return
+        try:
+            session = runtime.Session(
+                engine,
+                timeout=budget,
+                cancelled=lambda: self._closed or bool(cancelled and cancelled()),
+            )
+            session.check()
+            yield session
+        except AntigravityError as exc:
+            if exc.code in _ENGINE_FAULTS:
+                self._retire(engine)
+            raise
 
     def authentication(self, *, timeout: float | None = None) -> dict:
         """Read sign-in status; never return native token fields."""

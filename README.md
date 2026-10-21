@@ -169,6 +169,11 @@ if installation:
 High-level API разрешает только `finish` либо `generate_image` + `finish`.
 Произвольный RPC находится под управлением вызывающего проекта.
 
+`client.rpc("GetAvailableModels", concurrent=True)` позволяет прочитать метаданные
+из уже запущенного движка, пока агент генерирует ответ. Это опция с версии 0.1.1;
+по умолчанию RPC по-прежнему сериализованы. Для изменяющих состояние методов
+порядок и допустимость параллельного вызова определяет вызывающий проект.
+
 Нестандартная установка: `Client(executable=".../resources/bin/language_server.exe")`
 или переменная `ANTIGRAVITY_ENGINE_PATH`. Можно передать явный
 `Installation(executable, version)` для собственного обнаружения.

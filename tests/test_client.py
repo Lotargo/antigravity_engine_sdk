@@ -181,6 +181,40 @@ def wait_for_call(boundary, method):
     pytest.fail(f"Did not reach {method}")
 
 
+def test_concurrent_catalog_rpc_does_not_wait_for_generation(boundary):
+    boundary.set("running")
+    client = boundary.client()
+    stop, refreshed = threading.Event(), threading.Event()
+    errors, catalogs = [], []
+
+    def generate():
+        try:
+            client.chat("wait", model="test-low", cancelled=stop.is_set)
+        except AntigravityError as error:
+            errors.append(error.code)
+
+    def read_catalog():
+        catalogs.append(client.rpc("GetAvailableModels", concurrent=True))
+        refreshed.set()
+
+    worker = threading.Thread(target=generate)
+    reader = threading.Thread(target=read_catalog)
+    worker.start()
+    try:
+        wait_for_call(boundary, "GetCascadeTrajectory")
+        reader.start()
+        assert refreshed.wait(0.5)
+        assert worker.is_alive()
+    finally:
+        stop.set()
+        worker.join(timeout=5)
+        if reader.ident:
+            reader.join(timeout=5)
+    assert errors == ["cancelled"]
+    assert "test-low" in catalogs[0]["response"]["models"]
+    assert len(boundary.processes) == 1
+
+
 def test_cancel_interrupts_request_and_keeps_successfully_stopped_engine(boundary):
     boundary.set("running")
     client = boundary.client()
