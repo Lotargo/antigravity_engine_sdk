@@ -1,4 +1,4 @@
-"""Same browser UI, Python SDK backend. Run from this source checkout."""
+"""Shared browser UI with direct Python SDK and an owned Go SDK backend."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY / "src"))
+sys.path.insert(0, str(REPOSITORY))
 
 from antigravity_engine_sdk import (  # noqa: E402
     AntigravityError,
@@ -35,6 +36,7 @@ from antigravity_engine_sdk import (  # noqa: E402
     runtime,
 )
 from antigravity_engine_sdk.models import MAX_MEDIA_BYTES  # noqa: E402
+from python.testbench.go_backend import GoBackend  # noqa: E402
 
 ASSETS = REPOSITORY / "go/testbench/web"
 STATIC = {
@@ -44,6 +46,7 @@ STATIC = {
     "style.css",
     "editor.css",
     "editor-licenses.txt",
+    "sdk.js",
 }
 BASE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
@@ -101,6 +104,29 @@ class Stand:
         self.job_cancel = None
         self.job_started = 0
         self.workers = set()
+        self.go = None
+        self.go_error = "Соберите Go backend и перезапустите общий стенд. См. python/testbench/README.md."
+
+    def backends(self):
+        available = bool(self.go and self.go.available)
+        return {
+            "default": "python",
+            "backends": [
+                {
+                    "id": "python",
+                    "label": "Python",
+                    "version": __version__,
+                    "available": True,
+                },
+                {
+                    "id": "go",
+                    "label": "Go",
+                    "version": self.go.config.get("version", "") if self.go else "",
+                    "available": available,
+                    "reason": "" if available else self.go_error,
+                },
+            ],
+        }
 
     def close(self):
         self.stopped.set()
@@ -113,6 +139,8 @@ class Stand:
         self.client.close()
         if editor:
             editor.close()
+        if self.go:
+            self.go.close()
         for worker in workers:
             worker.join(timeout=10)
 
@@ -389,6 +417,11 @@ def handler(stand):
             if not self.guard():
                 return
             path = urlsplit(self.path).path
+            if path == "/api/backends":
+                self.send(200, stand.backends())
+                return
+            if path.startswith("/api/") and self.route_sdk():
+                return
             try:
                 if path in {"/", "/editor"}:
                     nonce = secrets.token_hex(24) if path == "/editor" else None
@@ -521,8 +554,33 @@ def handler(stand):
                     fields[name] = raw.decode("utf8")
             return fields, media, attachment
 
+        def route_sdk(self):
+            selected = self.headers.get("X-Testbench-SDK", "python")
+            if selected == "python":
+                return False
+            if selected != "go":
+                self.send(400, {"error": {"message": "Unknown SDK"}})
+                return True
+            try:
+                if not stand.go or not stand.go.available:
+                    raise RuntimeError(stand.go_error)
+                body = (
+                    self.read_body(MAX_MEDIA_BYTES + 5 * 1024 * 1024)
+                    if self.command == "POST"
+                    else None
+                )
+                status, raw = stand.go.request(
+                    self.command, self.path, body, self.headers.get("Content-Type")
+                )
+                self.send(status, json.loads(raw))
+            except Exception as error:
+                self.send(502, {"error": {"code": "go_backend", "message": str(error)}})
+            return True
+
         def do_POST(self):
             if not self.guard():
+                return
+            if self.route_sdk():
                 return
             path = urlsplit(self.path).path
             try:
@@ -594,6 +652,20 @@ def main():
     parser.add_argument("--executable")
     parser.add_argument("--model", default="gemini-3.8-flash-low")
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument(
+        "--go-testbench",
+        type=Path,
+        default=REPOSITORY
+        / "go/testbench/bin"
+        / (
+            "antigravity-testbench-shared.exe"
+            if sys.platform == "win32"
+            else "antigravity-testbench-shared"
+        ),
+    )
+    parser.add_argument(
+        "--python-only", action="store_true", help="do not start an owned Go backend"
+    )
     args = parser.parse_args()
     host, port = args.listen.rsplit(":", 1)
     host = host.strip("[]")
@@ -613,6 +685,18 @@ def main():
         address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
 
     server = Server((host, int(port)), handler(stand))
+    if not args.python_only:
+        try:
+            stand.go = GoBackend(
+                args.go_testbench,
+                output,
+                native=args.executable,
+                timeout=args.timeout,
+                model=args.model,
+            )
+            stand.go_error = "Go backend остановлен. Перезапустите общий стенд."
+        except Exception as error:
+            print(f"Go SDK unavailable: {error}", flush=True)
 
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
@@ -621,7 +705,9 @@ def main():
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, stop)
     print(
-        f"Antigravity Python SDK {__version__} | LIVE\nOpen http://{args.listen}/editor\nReports: {output}",
+        f"Antigravity shared testbench | LIVE | Python {__version__}"
+        f"{' + Go ' + stand.go.config['version'] if stand.go else ''}\n"
+        f"Open http://{args.listen}/editor\nReports: {output}",
         flush=True,
     )
     try:

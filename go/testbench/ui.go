@@ -30,6 +30,7 @@ type uiJob struct {
 	ID           string      `json:"id"`
 	Mode         string      `json:"mode"`
 	SDKVersion   string      `json:"sdk_version"`
+	SDKLanguage  string      `json:"sdk_language"`
 	Status       string      `json:"status"`
 	Phase        string      `json:"phase"`
 	Model        string      `json:"model"`
@@ -122,7 +123,7 @@ func (a *uiServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = t.Execute(w, struct{ Token, SDKLabel string }{a.token, "Go"})
 	})
-	for _, asset := range []string{"app.js", "editor.js", "style.css", "editor.css", "code-editor.js", "editor-licenses.txt"} {
+	for _, asset := range []string{"app.js", "editor.js", "sdk.js", "style.css", "editor.css", "code-editor.js", "editor-licenses.txt"} {
 		name := asset
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			data, _ := uiAssets.ReadFile("web/" + name)
@@ -154,6 +155,9 @@ func (a *uiServer) handler() http.Handler {
 	}
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, sdk.Object{"mode": a.mode, "model": a.model, "version": sdk.Version, "sdk_language": "Go", "max_media_bytes": sdk.MaxMediaBytes})
+	})
+	mux.HandleFunc("GET /api/backends", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, sdk.Object{"default": "go", "backends": []sdk.Object{{"id": "go", "label": "Go", "version": sdk.Version, "available": true}}})
 	})
 	mux.HandleFunc("GET /api/models", func(w http.ResponseWriter, r *http.Request) {
 		// Fresh catalog even while a high-level request owns the inference lock.
@@ -225,6 +229,10 @@ func (a *uiServer) handler() http.Handler {
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Testbench-Token")), []byte(a.token)) != 1 {
 			apiError(w, 403, fmt.Errorf("Reload the testbench page"))
+			return
+		}
+		if selected := r.Header.Get("X-Testbench-SDK"); strings.HasPrefix(r.URL.Path, "/api/") && selected != "" && selected != "go" {
+			apiError(w, 400, fmt.Errorf("This standalone backend serves Go only; use the shared Python launcher to switch SDKs"))
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -299,7 +307,7 @@ func (a *uiServer) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
-	job := &uiJob{ID: randomID(), Mode: a.mode, SDKVersion: sdk.Version, ResponseMode: responseMode, Status: "running", Phase: "starting", Model: model, Prompt: prompt, Attachment: attachment, StartedAt: time.Now(), UsageNote: "UNKNOWN until a completed native result is available", cancel: cancel}
+	job := &uiJob{ID: randomID(), Mode: a.mode, SDKVersion: sdk.Version, SDKLanguage: "Go", ResponseMode: responseMode, Status: "running", Phase: "starting", Model: model, Prompt: prompt, Attachment: attachment, StartedAt: time.Now(), UsageNote: "UNKNOWN until a completed native result is available", cancel: cancel}
 	a.job = job
 	a.wg.Add(1)
 	snapshot := a.snapshotLocked()

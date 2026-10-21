@@ -11,7 +11,7 @@ Connect JSON RPC. Работает без запуска Desktop и без agy C
 
 Нативная **Go-версия**: [go/README.md](go/README.md).
 Отдельный тестовый стенд с mock/live режимами: [go/testbench/](go/testbench/README.md).
-Тот же браузерный интерфейс с прямым Python backend:
+Общий браузерный интерфейс с переключением Python / Go SDK:
 [python/testbench/](python/testbench/README.md).
 
 ## Установка

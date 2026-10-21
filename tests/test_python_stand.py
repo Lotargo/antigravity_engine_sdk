@@ -75,7 +75,11 @@ def test_python_stand_security_templates_and_shared_assets(stand):
     nonces = []
     for _ in range(2):
         code, headers, raw = call(stand, "GET", "/editor")
-        assert code == 200 and b"Python SDK" in raw and b"{{." not in raw
+        assert (
+            code == 200
+            and b"data-sdk-label>Python</span> SDK" in raw
+            and b"{{." not in raw
+        )
         nonce = re.search(rb'name="editor-style-nonce" content="([a-f0-9]+)"', raw)[
             1
         ].decode()

@@ -1,21 +1,21 @@
 'use strict';
 import {createCodeEditor} from './code-editor.js';
+import {sdkStand} from './sdk.js';
 const $ = id => document.getElementById(id);
-const token = document.querySelector('meta[name="testbench-token"]').content;
 const nonce = document.querySelector('meta[name="editor-style-nonce"]').content;
-let ready = false, busy = false, commandActive = false, hasDocument = false, latest = null, sentText = '', poll;
+let ready = false, busy = true, commandActive = false, hasDocument = false, latest = null, sentText = '', poll, revision = 0, refreshing = false;
+const sessions = new Map(), results = new Map();
+function baselineKey() {return JSON.stringify([$('filename').value,$('language').value,editors.baseline.getText()]);}
 const editors={};
 editors.baseline=createCodeEditor({nonce,parent:$('baseline'),labelledBy:'baseline-label',describedBy:'baseline-help',onChange:()=>{ready=false;latest=null;controls();$('status').textContent='Исходная версия изменена. Нажмите «Запомнить исходную версию».';}});
 editors.code=createCodeEditor({nonce,parent:$('code'),labelledBy:'code-label',describedBy:'editor-help cursor status',onChange:()=>{hasDocument=true;$('download-status').textContent='';$('status').textContent='Код изменён в редакторе. Можно скачать файл или запустить новую команду.';},onSelection:cursor});
 editors.preview=createCodeEditor({nonce,parent:$('preview'),labelledBy:'preview-label',readOnly:true});
 function setLanguage(language) {for(const editor of Object.values(editors))editor.setLanguage(language);}
 async function api(path, body) {
-  const response = await fetch('/api/editor/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {'X-Testbench-Token': token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error?.message || value.message || JSON.stringify(value));
-  return value;
+  return sdkStand.request('/api/editor/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
 }
 function controls() {
+  sdkStand.setBusy(busy);
   for (const id of ['code-file', 'language', 'example', 'completion-example', 'setup']) $(id).disabled = busy;
   editors.baseline.setLocked(busy);editors.code.setLocked(busy);
   $('supercomplete').disabled = busy || !ready;
@@ -36,11 +36,13 @@ function documentValue(text) {
 }
 function failure(error) { $('error').textContent = error.message; busy = false; commandActive=false; controls(); }
 function loadDocument(name, language, before, after, offset) {
+  sessions.clear(); results.clear();
   hasDocument=true;$('download-status').textContent='';
   $('filename').value=name; $('language').value=language;
   setLanguage(language);editors.baseline.setDocument(before);editors.code.setDocument(after,offset);
   ready=false;latest=null;$('error').textContent='';editors.preview.setDocument('');$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';
   $('outcome').textContent='Правка появится после завершения потока.';
+  $('result-sdk').textContent='';
   $('status').textContent=`Загружен ${name}. Нажмите «Запомнить исходную версию».`;cursor();
 }
 const fileLanguages = {py:'python',pyw:'python',go:'go',js:'javascript',mjs:'javascript',cjs:'javascript',jsx:'javascriptreact',ts:'typescript',mts:'typescript',cts:'typescript',tsx:'typescriptreact',rs:'rust',java:'java',c:'c',h:'c',cc:'cpp',cpp:'cpp',cxx:'cpp',hpp:'cpp',cs:'csharp',rb:'ruby',php:'php',swift:'swift',kt:'kotlin',kts:'kotlin',dart:'dart',html:'html',htm:'html',css:'css',scss:'scss',json:'json',yaml:'yaml',yml:'yaml',sql:'sql',sh:'shellscript',bash:'shellscript',zsh:'shellscript',ps1:'powershell',psm1:'powershell',md:'markdown'};
@@ -68,24 +70,31 @@ $('example').onclick = () => loadExample('tab_jump');
 $('completion-example').onclick = () => loadExample('supercomplete');
 $('setup').onclick = async () => {
   busy=true;latest=null;controls();$('error').textContent='';$('status').textContent='Создаю сессию и историю исходного текста…';
-  try {await api('setup',{...documentValue(editors.baseline.getText()),cursor_offset:0});ready=true;$('status').textContent='Сессия готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.';busy=false;controls();} catch(e){ready=false;failure(e);}
+  try {await api('setup',{...documentValue(editors.baseline.getText()),cursor_offset:0});sessions.set(sdkStand.id,baselineKey());results.delete(sdkStand.id);ready=true;$('status').textContent=`Сессия ${sdkStand.label} готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.`;busy=false;controls();} catch(e){ready=false;sessions.delete(sdkStand.id);failure(e);}
 };
 async function run(kind) {
+  revision++;
   busy=true;commandActive=true;latest=null;sentText=editors.code.getText();editors.code.clearJump();controls();$('error').textContent='';editors.preview.setDocument('');$('diff').textContent='—';$('outcome').textContent='Ожидание нативного потока…';$('status').textContent='Запрос выполняется…';
   try {await api('run',{kind,document:documentValue(sentText)});poll=setInterval(refresh,300);await refresh();} catch(e){failure(e);}
 }
 async function refresh() {
+  if(refreshing)return;refreshing=true;const version=revision;
   try {
-    const v = await api('state');$('status').textContent=`${v.status} · кадров: ${v.frames}`;
+    const v = await api('state');if(version!==revision)return;$('status').textContent=`${v.status} · кадров: ${v.frames}`;
     if (['running','cancelling'].includes(v.status)) return;
     clearInterval(poll);busy=false;commandActive=false;latest=v;
+    results.set(sdkStand.id,{latest:v,sentText});renderResult(v);controls();
+  } catch(e){if(version===revision){clearInterval(poll);failure(e);}}
+  finally {refreshing=false;}
+}
+function renderResult(v) {
     $('error').textContent=v.error || v.report_error || '';
+    $('result-sdk').textContent=`${sdkStand.label} SDK ${sdkStand.version}${v.result ? ` · ${(v.result.latency_ms/1000).toFixed(2)} с · native ${v.result.engine_version}` : ''}`;
     editors.preview.setDocument(v.preview ?? '');
     const r=v.result?.response,j=r?.jumpPosition;
     $('outcome').textContent = r?.filterReason ? `Подсказка отфильтрована: ${r.filterReason.reason}` : j && v.result.status==='jump' ? `Переход: строка ${Number(j.row||0)+1}, столбец ${Number(j.col||0)+1}. Нативная позиция: row=${j.row||0}, col=${j.col||0}.` : v.result?.status==='empty' ? (v.result.kind === 'SUPERCOMPLETE' ? 'В этом запросе native не предложил правку.' : 'В этом запросе native не предложил переход.') : `Результат: ${v.result?.status || v.status}. ${v.preview_error || ''}`;
     $('diff').textContent=(r?.diff?.lines || []).map(line=>(line.type==='UNIFIED_DIFF_LINE_TYPE_INSERT'?'+ ':line.type==='UNIFIED_DIFF_LINE_TYPE_DELETE'?'- ':'  ')+(line.text || '')).join('\n') || '—';
-    $('raw').textContent=JSON.stringify(v.result || v,null,2);$('report').textContent=v.report ? `Отчёт: ${v.report}` : '';controls();
-  } catch(e){clearInterval(poll);failure(e);}
+    $('raw').textContent=JSON.stringify(v.result || v,null,2);$('report').textContent=v.report ? `Отчёт: ${v.report}` : '';
 }
 $('supercomplete').onclick=()=>run('supercomplete');$('jump').onclick=()=>run('tab_jump');
 $('cancel').onclick=async()=>{try{await api('cancel',{});}catch(e){failure(e);}};
@@ -105,3 +114,17 @@ $('move').onclick=()=>{
   catch(error){$('error').textContent=error.message;}
 };
 controls();
+(async()=>{
+  try {
+    await sdkStand.init(()=>{
+      revision++;clearInterval(poll);latest=null;sentText='';editors.code.clearJump();
+      ready=sessions.get(sdkStand.id)===baselineKey();
+      const cached=results.get(sdkStand.id);
+      if(cached){latest=cached.latest;sentText=cached.sentText;renderResult(latest);}
+      else {editors.preview.setDocument('');$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';$('error').textContent='';$('result-sdk').textContent='';$('outcome').textContent='Для этого SDK результата ещё нет.';}
+      $('status').textContent=ready ? `Сессия ${sdkStand.label} готова. Код сохранён.` : `Выбран ${sdkStand.label} SDK. Код сохранён. Нажмите «Запомнить исходную версию».`;
+      controls();
+    },failure);
+    busy=false;controls();
+  } catch(e){$('error').textContent=e.message;}
+})();

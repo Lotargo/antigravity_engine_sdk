@@ -8,14 +8,15 @@
   <title>Antigravity · {{.SDKLabel}} стенд</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
 <main>
   <header>
-    <div><h1>Antigravity <span>{{.SDKLabel}} стенд</span></h1><p class="subtitle">Выберите модель и отправьте пробный запрос.</p></div>
+    <div><h1>Antigravity <span><span data-sdk-label>{{.SDKLabel}}</span> стенд</span></h1><p class="subtitle">Выберите модель и отправьте пробный запрос. <a href="/editor">Редактор кода</a></p></div>
     <p id="mode" class="mode">Подключение…</p>
   </header>
+  <section class="sdk-switch" aria-label="Выбор SDK"><label for="sdk">SDK</label><select id="sdk" disabled aria-describedby="sdk-help sdk-status"><option>Загрузка…</option></select><p id="sdk-status" role="status" aria-live="polite">Подключение…</p><p id="sdk-help" class="hint"></p></section>
   <div class="workspace">
     <section aria-labelledby="request-title">
       <h2 id="request-title">Запрос</h2>

@@ -172,7 +172,7 @@ func (e *editorStand) routes(mux *http.ServeMux) {
 					e.view.PreviewError = previewErr.Error()
 				}
 			}
-			report := sdk.Object{"date": time.Now().Format("2006-01-02"), "sdk_version": sdk.Version, "baseline": baseline, "document": p.Document, "request_kind": p.Kind, "view": e.view, "usage": "UNKNOWN", "model_selection": "native editor configuration"}
+			report := sdk.Object{"date": time.Now().Format("2006-01-02"), "sdk_language": "Go", "sdk_version": sdk.Version, "baseline": baseline, "document": p.Document, "request_kind": p.Kind, "view": e.view, "usage": "UNKNOWN", "model_selection": "native editor configuration"}
 			data, saveErr := json.MarshalIndent(report, "", "  ")
 			path := filepath.Join(e.output, "editor-"+id+".json")
 			if saveErr == nil {

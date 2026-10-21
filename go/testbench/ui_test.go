@@ -37,6 +37,25 @@ func testUI(t *testing.T) (*uiServer, *httptest.Server) {
 	t.Cleanup(func() { cancel(); _ = client.Close(); server.Close(); app.wg.Wait() })
 	return app, server
 }
+
+func TestStandaloneGoSDKIdentity(t *testing.T) {
+	a, server := testUI(t)
+	status, data := uiCall(t, a, server, "GET", "/api/backends", nil, "")
+	if status != 200 || !bytes.Contains(data, []byte(`"default":"go"`)) {
+		t.Fatalf("backend identity: %d %s", status, data)
+	}
+	r, _ := http.NewRequest("GET", server.URL+"/api/config", nil)
+	r.Header.Set("X-Testbench-Token", a.token)
+	r.Header.Set("X-Testbench-SDK", "python")
+	response, err := server.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 400 {
+		t.Fatalf("wrong SDK silently accepted: %d", response.StatusCode)
+	}
+}
 func uiCall(t *testing.T, a *uiServer, s *httptest.Server, method, path string, body io.Reader, kind string) (int, []byte) {
 	t.Helper()
 	r, err := http.NewRequest(method, s.URL+path, body)

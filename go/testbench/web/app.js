@@ -1,6 +1,6 @@
 'use strict';
+import {sdkStand} from './sdk.js';
 const $ = id => document.getElementById(id);
-const token = document.querySelector('meta[name="testbench-token"]').content;
 const state = { models: [], job: null, posting: false, refreshing: false, file: null, preview: '', config: null, loading: true };
 const statuses = { running: 'Запрос выполняется', cancelling: 'Отменяем запрос…', cancelled: 'Запрос отменён', completed: 'Готово', error: 'Ошибка запроса' };
 const phases = { starting: 'Запускаем запрос…', working: 'Модель готовит ответ…', trajectory: 'Модель готовит ответ…' };
@@ -8,15 +8,13 @@ let polling = false;
 let connectionLost = false;
 let viewRevision = 0;
 async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { ...options.headers, 'X-Testbench-Token': token } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
-  return data;
+  return sdkStand.request(path, options);
 }
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function active() { return state.posting || ['running', 'cancelling'].includes(state.job?.status); }
 function controls() {
   const busy = active();
+  sdkStand.setBusy(busy || state.loading || state.refreshing);
   const card = state.models.find(m => m.id === $('model').value);
   const incompatible = !!(state.file && card && !card.supports_images);
   $('model').disabled = busy || state.refreshing || !state.models.length;
@@ -52,7 +50,13 @@ async function loadModels() {
 }
 function renderJob(job) {
   state.job = job;
-  if (!job) { controls(); return; }
+  if (!job) {
+    $('status').textContent = 'Готов к запросу'; $('status').dataset.state = '';
+    $('answer').textContent = 'Ответ модели появится здесь.'; $('answer').classList.add('empty');
+    $('answer').setAttribute('aria-busy', 'false'); $('elapsed').textContent = '';
+    $('diagnostics').hidden = true; $('result-meta').textContent = ''; $('download').disabled = true;
+    controls(); return;
+  }
   const busy = ['running', 'cancelling'].includes(job.status);
   const status = job.status === 'running' ? (phases[job.phase] || statuses.running) : (statuses[job.status] || job.status);
   if ($('status').textContent !== status) $('status').textContent = status;
@@ -67,20 +71,20 @@ function renderJob(job) {
   $('engine').textContent = job.result?.engine_version || '—';
   $('usage').textContent = job.result ? job.result.usage_scope : 'UNKNOWN';
   $('usage-json').textContent = job.result ? JSON.stringify(job.result.usage, null, 2) : 'Расход отменённого или незавершённого запроса неизвестен.';
-  $('result-meta').textContent = [job.model, job.response_mode === 'text' ? 'Обычный текст' : 'finish', job.attachment ? `Вложение: ${job.attachment}` : ''].filter(Boolean).join(' · ');
+  $('result-meta').textContent = [`${job.sdk_language || sdkStand.label} SDK ${job.sdk_version || sdkStand.version}`, job.model, job.response_mode === 'text' ? 'Обычный текст' : 'finish', job.attachment ? `Вложение: ${job.attachment}` : ''].filter(Boolean).join(' · ');
   $('report-note').textContent = job.report_error ? `Отчёт не сохранён: ${job.report_error}` : job.report ? `Сохранён: ${job.report}` : '';
   $('download').disabled = !job.report;
   controls();
 }
 async function poll() {
-  if (polling || state.posting) return; polling = true;
+  if (polling || state.posting || state.loading) return; polling = true;
   const revision = viewRevision;
   try {
     const job = await api('/api/request');
     if (revision === viewRevision) renderJob(job);
-    if (connectionLost) { connectionLost = false; error(); }
+    if (revision === viewRevision && connectionLost) { connectionLost = false; error(); }
   }
-  catch (e) { connectionLost = true; error(`Нет связи со стендом: ${e.message}. Повторяем подключение…`); }
+  catch (e) { if (revision === viewRevision) { connectionLost = true; error(`Нет связи со стендом: ${e.message}. Повторяем подключение…`); } }
   finally { polling = false; }
 }
 $('refresh').addEventListener('click', loadModels);
@@ -131,15 +135,22 @@ $('download').addEventListener('click', async () => {
     const link = document.createElement('a'); link.href = url; link.download = `request-${state.job.id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (e) { error(e.message); }
 });
-(async () => {
+async function connect() {
+  viewRevision++; state.loading = true; state.models = []; renderJob(null); error(); controls();
   try {
     state.config = await api('/api/config');
     $('mode').textContent = state.config.mode === 'live' ? 'Реальный движок' : 'Mock · без вызова модели';
     $('footer').textContent = `Локальный тестовый стенд · ${state.config.sdk_language || 'Go'} SDK ${state.config.version} · ${state.config.mode === 'live' ? 'Генерация запускается кнопкой «Отправить запрос»' : 'Ответы mock — тестовые данные'}`;
     renderJob(await api('/api/request'));
-    if (state.job) $('prompt').value = state.job.prompt;
-	if (state.job) $('response-mode').value=state.job.response_mode || 'finish';
     await loadModels();
   } catch (e) { error(`Не удалось подключиться: ${e.message}`); }
-  finally { state.loading = false; controls(); setInterval(poll, 600); }
+  finally { state.loading = false; controls(); }
+}
+(async () => {
+  try {
+    await sdkStand.init(connect, e => error(e.message));
+    await connect();
+    if (state.job) { $('prompt').value = state.job.prompt; $('response-mode').value = state.job.response_mode || 'finish'; controls(); }
+    setInterval(poll, 600);
+  } catch (e) { error(e.message); }
 })();
