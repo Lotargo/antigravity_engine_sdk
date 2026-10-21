@@ -181,9 +181,15 @@ func (s *EditorSession) Sync(parent context.Context, d EditorDocument) error {
 	return err
 }
 
-// Supercomplete is one real native model request. TYPING is essential: FORCED
-// does not initialize granular history on native 2.24. No suggestion is applied.
+// Supercomplete replays actual snapshots in a fresh context and requests one
+// native edit, independently of when the user last changed the code.
 func (s *EditorSession) Supercomplete(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
+	return s.replayCompletion(ctx, "SUPERCOMPLETE", onFrame)
+}
+
+// SupercompleteNative retains the automatic IDE path and its recent-edit window.
+// TYPING initializes granular history on native 2.24; FORCED does not.
+func (s *EditorSession) SupercompleteNative(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
 	return s.complete(ctx, "SUPERCOMPLETE", onFrame)
 }
 
@@ -191,11 +197,11 @@ func (s *EditorSession) Supercomplete(ctx context.Context, onFrame func(EditorRe
 // It requires no previous Supercomplete and has no user-facing edit-age window.
 // A zero-inference context bootstrap is supported on verified native 2.24.0.
 func (s *EditorSession) TabToJump(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
-	return s.replayTabToJump(ctx, onFrame)
+	return s.replayCompletion(ctx, "TAB_JUMP", onFrame)
 }
 
 // TabToJumpNative exposes the original automatic editor path. It requires a
-// prior Supercomplete and recent edits; use TabToJump for an independent action.
+// prior SupercompleteNative and recent edits; use TabToJump for an independent action.
 func (s *EditorSession) TabToJumpNative(ctx context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
 	return s.complete(ctx, "TAB_JUMP", onFrame)
 }
@@ -208,7 +214,7 @@ func (s *EditorSession) complete(parent context.Context, kind string, onFrame fu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.opened || (kind == "TAB_JUMP" && !s.primed) {
-		return nil, fault("editor_not_ready", "Sync snapshots and call Supercomplete before TabToJump.", nil)
+		return nil, fault("editor_not_ready", "Sync snapshots and call SupercompleteNative before TabToJumpNative.", nil)
 	}
 	e, release, err := s.client.acquire(ctx, false)
 	if err != nil {

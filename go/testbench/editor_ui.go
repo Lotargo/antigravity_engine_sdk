@@ -61,6 +61,9 @@ func readEditorJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 func (e *editorStand) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/editor/example", func(w http.ResponseWriter, r *http.Request) {
 		before, after, cursor := editorExample()
+		if r.URL.Query().Get("kind") == "supercomplete" {
+			before, after, cursor = completionExample()
+		}
 		writeJSON(w, 200, sdk.Object{"before": before, "after": after, "cursor": cursor})
 	})
 	mux.HandleFunc("GET /api/editor/state", func(w http.ResponseWriter, r *http.Request) {

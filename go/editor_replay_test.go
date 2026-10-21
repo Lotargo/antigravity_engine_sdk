@@ -14,6 +14,105 @@ func replayFixture(t *testing.T, scenarioName string) *EditorSession {
 	c.config.Installation.Version = "2.24.0"
 	return &EditorSession{client: c, sessionID: "manual-test"}
 }
+
+func TestIndependentSupercomplete(t *testing.T) {
+	for _, scenario := range []string{"editor_success", "editor_empty", "editor_filtered", "editor_bootstrap_data", "editor_running"} {
+		t.Run(scenario, func(t *testing.T) {
+			s := replayFixture(t, scenario)
+			ctx := context.Background()
+			for _, text := range []string{"old", "new"} {
+				if err := s.Sync(ctx, EditorDocument{Name: "test.py", Language: "python", Text: text}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			observed := time.Now().Add(-time.Hour)
+			s.history[1].ObservedAt = observed
+			request, cancel := context.WithCancel(ctx)
+			defer cancel()
+			r, err := s.Supercomplete(request, func(EditorResponse) {
+				if scenario == "editor_running" {
+					cancel()
+				}
+			})
+			if scenario == "editor_bootstrap_data" {
+				requireCode(t, err, "incompatible_format")
+				if len(r.Frames) != 0 || len(r.Preparation.BootstrapFrames) != 1 {
+					t.Fatal(r)
+				}
+				return
+			}
+			if scenario == "editor_running" {
+				requireCode(t, err, "cancelled")
+				if r.Status != "incomplete" {
+					t.Fatal(r)
+				}
+				if _, err = r.Preview("new"); ErrorCode(err) != "stale_edit" {
+					t.Fatal(err)
+				}
+				t.Setenv("ANTIGRAVITY_GO_MOCK_SCENARIO", "editor_success")
+				r, err = s.Supercomplete(ctx, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Kind != "SUPERCOMPLETE" || r.RequestedNativeModel != "MODEL_TAB" || s.primed || !r.Preparation.Snapshots[1].ObservedAt.Equal(observed) || len(r.Preparation.BootstrapFrames) != 0 {
+				t.Fatal(r)
+			}
+			if scenario == "editor_empty" {
+				if r.Status != "empty" {
+					t.Fatal(r)
+				}
+				return
+			}
+			if scenario == "editor_filtered" {
+				if r.Status != "filtered" {
+					t.Fatal(r)
+				}
+				return
+			}
+			if r.Status != "edit" || r.Response.JumpPosition != nil {
+				t.Fatal(r)
+			}
+			var raw Object
+			_ = json.Unmarshal(r.Frames[0], &raw)
+			calls := field(field(raw, "requestInfo"), "testGenerationCalls")
+			if calls["supercomplete"] != float64(1) || calls["tab_jump"] != float64(0) {
+				t.Fatal("unexpected generation", calls)
+			}
+			preview, err := r.Preview("new")
+			if err != nil || preview != "new!" {
+				t.Fatal(preview, err)
+			}
+		})
+	}
+	t.Run("no_snapshot", func(t *testing.T) {
+		s := replayFixture(t, "editor_success")
+		_, err := s.Supercomplete(context.Background(), nil)
+		requireCode(t, err, "editor_not_ready")
+	})
+	t.Run("single_snapshot", func(t *testing.T) {
+		s := replayFixture(t, "editor_success")
+		if err := s.Sync(context.Background(), EditorDocument{Name: "test.py", Language: "python", Text: "current"}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := s.Supercomplete(context.Background(), nil)
+		if err != nil || r.Status != "edit" || len(r.Preparation.Snapshots) != 1 {
+			t.Fatal(r, err)
+		}
+	})
+	t.Run("version", func(t *testing.T) {
+		s := replayFixture(t, "editor_success")
+		s.client.config.Installation.Version = "2.23.0"
+		if err := s.Sync(context.Background(), EditorDocument{Name: "test.py", Language: "python", Text: "current"}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := s.Supercomplete(context.Background(), nil)
+		requireCode(t, err, "unsupported_editor_version")
+		if r.Preparation.BootstrapTerminal != nil {
+			t.Fatal("unexpected bootstrap")
+		}
+	})
+}
 func TestIndependentTabReplayWithoutSupercompleteOrRecentEdit(t *testing.T) {
 	s := replayFixture(t, "editor_success")
 	ctx := context.Background()

@@ -21,7 +21,11 @@ func editorExample() (string, string, int) {
 	after := strings.Replace(before, "tax_rate", "vat_rate", 1)
 	return before, after, strings.Index(after, "vat_rate") + len("vat_rate")
 }
-func runEditorScenario(ctx context.Context, config sdk.Config, output string, independent bool, idle time.Duration) int {
+func completionExample() (string, string, int) {
+	text := "def add(a, b):\n    return \n"
+	return text, text, len("def add(a, b):\n    return ")
+}
+func runEditorScenario(ctx context.Context, config sdk.Config, output string, mode string, idle time.Duration) int {
 	s, err := sdk.NewEditorSession(config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -29,6 +33,9 @@ func runEditorScenario(ctx context.Context, config sdk.Config, output string, in
 	}
 	defer s.Close()
 	before, after, cursor := editorExample()
+	if mode == "supercomplete" {
+		before, after, cursor = completionExample()
+	}
 	doc := sdk.EditorDocument{Name: "sample.py", Language: "python", Text: before, CursorOffset: cursor}
 	if err = s.Sync(ctx, doc); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -41,7 +48,7 @@ func runEditorScenario(ctx context.Context, config sdk.Config, output string, in
 	}
 	r := sdk.Object{"date": time.Now().Format("2006-01-02"), "sdk_version": sdk.Version, "before": before, "document": doc, "usage": "UNKNOWN", "model_selection": "native editor configuration; requested catalog ID is not an attribution of actual model"}
 	if idle > 0 {
-		fmt.Printf("Snapshots synced; idle for %s without edits or Supercomplete.\n", idle)
+		fmt.Printf("Snapshots synced; idle for %s without edits or model requests.\n", idle)
 		started := time.Now()
 		timer := time.NewTimer(idle)
 		defer timer.Stop()
@@ -55,8 +62,10 @@ func runEditorScenario(ctx context.Context, config sdk.Config, output string, in
 	}
 	code := 0
 	kinds := []string{"supercomplete", "tab_jump"}
-	if independent {
+	if mode == "jump" {
 		kinds = []string{"tab_jump"}
+	} else if mode == "supercomplete" {
+		kinds = []string{"supercomplete"}
 	}
 	for _, kind := range kinds {
 		var result *sdk.EditorResult

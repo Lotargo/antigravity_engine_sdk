@@ -1,6 +1,6 @@
 # Antigravity Engine SDK for Go
 
-Нативная Go-версия SDK `0.4.0`. Модуль:
+Нативная Go-версия SDK `0.5.0`. Модуль:
 `github.com/Lotargo/antigravity_engine_sdk/go`. Python и agy CLI не нужны.
 Go 1.23+, для live — установленный Antigravity 2.x с выполненным входом.
 Лицензия AGPL-3.0-only, см. [LICENSE](LICENSE).
@@ -103,7 +103,8 @@ Native текст сохраняется буквально: лишние кав
 и ошибки сгенерированного кода автоматически не исправляются.
 
 Обе `tab_*` проверены в этом режиме. Это текстовое использование моделей;
-native IDE Supercomplete/Tab-to-Jump с diff/cursor не подтверждены в standalone.
+Для нативных Supercomplete/Tab-to-Jump с diff/cursor используйте `EditorSession`,
+описанный ниже; текстовый `Complete` не возвращает их редакторный контракт.
 Подробнее: [TAB-MODELS-2026-10-21.md](TAB-MODELS-2026-10-21.md).
 
 ### Структурированный результат
@@ -207,9 +208,10 @@ _ = previewErr // filtered/no-op/empty не являются применимо�
 окончания строк, отклоняет неизвестные изменения и устаревший исходник.
 Не применяйте промежуточные кадры: они являются растущими снимками результата.
 
-`TabToJump` работает отдельно: на каждый вызов создаётся временный движок,
+`Supercomplete` и `TabToJump` работают отдельно: на каждый вызов создаётся временный движок,
 подготавливается контекст без генерации Supercomplete, затем воспроизводятся
-два последних реальных снимка и выполняется один запрос к Tab-to-Jump модели.
+до двух последних реальных снимков и выполняется один запрос к модели выбранной команды.
+Достаточно одного `Sync`: предварительно менять код или запускать другую команду не нужно.
 Оригинальные даты наблюдения сохраняются в `Preparation.Snapshots`; время
 загрузки контекста — в `Preparation.ReplayedAt`. Это повторная загрузка
 сохранённого контекста, а не новые действия пользователя. Технический пустой
@@ -219,11 +221,12 @@ _ = previewErr // filtered/no-op/empty не являются применимо�
 `unsupported_editor_version` до bootstrap: порядок внутренней инициализации
 и фильтра нельзя предполагать стабильным. Неожиданный data frame подготовки
 тоже останавливает вызов. Raw bootstrap frames/terminal сохраняются отдельно
-от кадров Tab-to-Jump. Дополнительной генерации Supercomplete нет.
+от кадров основной команды. Дополнительной генерации Supercomplete нет.
 
 `TabToJumpNative` оставляет прежний автоматический путь: для него нужен
-предварительный `Supercomplete`, и действует нативное окно недавней правки.
-`Supercomplete` также сохраняет исходное автоматическое поведение.
+предварительный `SupercompleteNative`, и действует нативное окно недавней правки.
+`SupercompleteNative` также сохраняет исходное автоматическое поведение.
+Ручные `Supercomplete` и `TabToJump` не подготавливают автоматическую сессию.
 Команды запрашивают `tab_flash_lite_preview` / `tab_jump_flash_lite_preview`:
 native ID каждый раз читается из свежего каталога, сохраняется в
 `RequestedModel` / `RequestedNativeModel` и передаётся в requestedModelId.
@@ -233,11 +236,14 @@ native ID каждый раз читается из свежего катало�
 сохраняются в результате. Отмена через context прерывает HTTP stream;
 незавершённый ответ имеет `Status: incomplete` и не применяется.
 
-Ручной стенд: `go run ./testbench --live --ui --listen 127.0.0.1:8767`,
+Ручной стенд: `go run ./testbench --live --ui --listen 127.0.0.1:8769`,
 затем `/editor`. CLI-проба: `go run ./testbench --live --case editor`.
 Проверка независимого перехода после паузы:
 `go run ./testbench --live --case jump --editor-idle 65s`.
-Подробности: [INDEPENDENT-JUMP-2026-10-21.md](INDEPENDENT-JUMP-2026-10-21.md).
+Проверка независимой правки после паузы:
+`go run ./testbench --live --case supercomplete --editor-idle 65s`.
+Подробности: [INDEPENDENT-JUMP-2026-10-21.md](INDEPENDENT-JUMP-2026-10-21.md),
+[INDEPENDENT-SUPERCOMPLETE-2026-10-21.md](INDEPENDENT-SUPERCOMPLETE-2026-10-21.md).
 
 ## Диагностика и границы
 

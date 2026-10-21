@@ -127,7 +127,7 @@ func sendFrame(w http.ResponseWriter, flags byte, value object) {
 func (s *server) editorStream(w http.ResponseWriter, r *http.Request, p object) {
 	w.Header().Set("Content-Type", "application/connect+json")
 	doc := obj(p["document"])
-	if str(p, "requestSource") == "COMMAND_REQUEST_SOURCE_SUPERCOMPLETE" {
+	if str(p, "requestSource") == "COMMAND_REQUEST_SOURCE_SUPERCOMPLETE" && str(doc, "timestamp") == "1970-01-01T00:00:00Z" {
 		if str(doc, "text") != "" || str(doc, "timestamp") != "1970-01-01T00:00:00Z" || doc["cursorOffset"] != "0" || doc["isDirty"] != false {
 			sendFrame(w, 2, object{"error": object{"code": "invalid_argument"}})
 			return
@@ -141,7 +141,9 @@ func (s *server) editorStream(w http.ResponseWriter, r *http.Request, p object) 
 		sendFrame(w, 2, object{})
 		return
 	}
-	if !s.editorPrimed || len(s.editorDocuments) < 2 || str(p, "requestSource") != "COMMAND_REQUEST_SOURCE_TAB_JUMP" || str(p, "requestedModelId") != "MODEL_JUMP" {
+	supercomplete := str(p, "requestSource") == "COMMAND_REQUEST_SOURCE_SUPERCOMPLETE" && str(p, "requestedModelId") == "MODEL_TAB"
+	jump := str(p, "requestSource") == "COMMAND_REQUEST_SOURCE_TAB_JUMP" && str(p, "requestedModelId") == "MODEL_JUMP"
+	if !s.editorPrimed || len(s.editorDocuments) < 2 || (!supercomplete && !jump) {
 		sendFrame(w, 2, object{"error": object{"code": "failed_precondition"}})
 		return
 	}
@@ -156,6 +158,11 @@ func (s *server) editorStream(w http.ResponseWriter, r *http.Request, p object) 
 		return
 	}
 	response := object{"completionId": "jump", "jumpPosition": object{"row": "0", "col": "0"}, "selectionEndLine": "1", "characterDiff": object{"changes": []any{object{"text": str(doc, "text"), "type": "DIFF_CHANGE_TYPE_UNCHANGED"}, object{"text": "!", "type": "DIFF_CHANGE_TYPE_INSERT"}}}, "requestInfo": object{"testReplay": s.editorDocuments, "testGenerationCalls": object{"supercomplete": 0, "tab_jump": 1}}}
+	if supercomplete {
+		delete(response, "jumpPosition")
+		response["completionId"] = "edit"
+		obj(response["requestInfo"])["testGenerationCalls"] = object{"supercomplete": 1, "tab_jump": 0}
+	}
 	if s.scenario == "editor_filtered" {
 		response["filterReason"] = object{"reason": "no useful jump"}
 	}

@@ -102,7 +102,7 @@ func TestEditorSessionProtocol(t *testing.T) {
 	if strings.Join(snapshots, ",") != "old,a" || streamCount != 0 {
 		t.Fatal("Sync must only record real snapshots")
 	}
-	r, err := s.Supercomplete(ctx, nil)
+	r, err := s.SupercompleteNative(ctx, nil)
 	if err != nil || r.Status != "edit" {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -157,7 +157,7 @@ func TestEditorStreamFailuresAndFiltering(t *testing.T) {
 			s.document = EditorDocument{Name: "test.py", Language: "python", Text: "a", CursorOffset: 1}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			r, err := s.Supercomplete(ctx, func(EditorResponse) {
+			r, err := s.SupercompleteNative(ctx, func(EditorResponse) {
 				if tc.name == "cancelled" {
 					cancel()
 				}

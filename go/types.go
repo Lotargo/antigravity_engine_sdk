@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.4.0"
+const Version = "0.5.0"
 const MaxMediaBytes = 20 * 1024 * 1024
 
 // Object preserves native fields, including string token counters.

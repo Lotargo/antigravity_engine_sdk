@@ -12,7 +12,7 @@ import (
 // 30s edit-age guard. An actual empty SDK sentinel with an epoch mtime takes
 // that guard before any model request. User documents and their observed times
 // remain separate; only genuine snapshots are then replayed into this context.
-func (s *EditorSession) replayTabToJump(parent context.Context, onFrame func(EditorResponse)) (*EditorResult, error) {
+func (s *EditorSession) replayCompletion(parent context.Context, kind string, onFrame func(EditorResponse)) (*EditorResult, error) {
 	ctx, cancel, err := s.client.requestContext(parent)
 	if err != nil {
 		return nil, err
@@ -21,9 +21,13 @@ func (s *EditorSession) replayTabToJump(parent context.Context, onFrame func(Edi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.opened {
-		return nil, fault("editor_not_ready", "Sync a document before TabToJump.", nil)
+		return nil, fault("editor_not_ready", "Sync a document before requesting an editor suggestion.", nil)
 	}
-	r := &EditorResult{Kind: "TAB_JUMP", Status: "incomplete", Frames: []json.RawMessage{}, SourceSHA256: hash(s.document.Text), Usage: "UNKNOWN", RequestedModel: "tab_jump_flash_lite_preview", Preparation: &EditorPreparation{Mode: "snapshot_replay", ReplayedAt: time.Now().UTC(), Snapshots: append([]EditorSnapshot(nil), s.history...), BootstrapFrames: []json.RawMessage{}}}
+	model := "tab_flash_lite_preview"
+	if kind == "TAB_JUMP" {
+		model = "tab_jump_flash_lite_preview"
+	}
+	r := &EditorResult{Kind: kind, Status: "incomplete", Frames: []json.RawMessage{}, SourceSHA256: hash(s.document.Text), Usage: "UNKNOWN", RequestedModel: model, Preparation: &EditorPreparation{Mode: "snapshot_replay", ReplayedAt: time.Now().UTC(), Snapshots: append([]EditorSnapshot(nil), s.history...), BootstrapFrames: []json.RawMessage{}}}
 	started := time.Now()
 	defer func() { r.LatencyMS = time.Since(started).Milliseconds() }()
 	child, err := NewClient(s.client.config)
@@ -40,7 +44,7 @@ func (s *EditorSession) replayTabToJump(parent context.Context, onFrame func(Edi
 	// Fail closed on unverified engines: a future native may change the order of
 	// its bootstrap/filter and silently turn initialization into model inference.
 	if e.installation.Version != "2.24.0" {
-		return r, fault("unsupported_editor_version", "Independent TabToJump is verified on native 2.24.0; no bootstrap was sent.", nil)
+		return r, fault("unsupported_editor_version", "Independent editor suggestions are verified on native 2.24.0; no bootstrap was sent.", nil)
 	}
 	root := filepath.Join(e.root, "workspace")
 	workspace := fileURI(root)
@@ -87,7 +91,7 @@ func (s *EditorSession) replayTabToJump(parent context.Context, onFrame func(Edi
 	prepStarted := time.Now()
 	err = e.streamRPC(ctx, "HandleStreamingCommand", payload(prime, "SUPERCOMPLETE", bootstrapModel), func(raw json.RawMessage) error {
 		r.Preparation.BootstrapFrames = append(r.Preparation.BootstrapFrames, append(json.RawMessage(nil), raw...))
-		return fault("incompatible_format", "Context bootstrap unexpectedly returned a data frame; no Tab-to-Jump was sent.", nil)
+		return fault("incompatible_format", "Context bootstrap unexpectedly returned a data frame; no editor generation was sent.", nil)
 	}, &r.Preparation.BootstrapTerminal)
 	r.Preparation.BootstrapMS = time.Since(prepStarted).Milliseconds()
 	if err != nil {
@@ -105,6 +109,6 @@ func (s *EditorSession) replayTabToJump(parent context.Context, onFrame func(Edi
 			return r, err
 		}
 	}
-	err = receiveEditorResult(ctx, e, payload(editorDocumentObject(uri, workspace, s.document), "TAB_JUMP", r.RequestedNativeModel), r, onFrame)
+	err = receiveEditorResult(ctx, e, payload(editorDocumentObject(uri, workspace, s.document), kind, r.RequestedNativeModel), r, onFrame)
 	return r, err
 }
