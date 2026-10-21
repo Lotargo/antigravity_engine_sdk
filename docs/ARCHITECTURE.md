@@ -2,7 +2,7 @@
 
 Дата: 2026-10-21.
 
-SDK выделен из `F:/projects/comfy-meta-viewer`, исходная ревизия
+SDK выделен из проекта VEIL (Comfy Meta Viewer), исходная ревизия
 `fb2ec82f98e0de121f68e31584eb064f99582887`.
 
 | Исходный компонент | Компонент SDK | Изменение |
@@ -16,7 +16,7 @@ SDK выделен из `F:/projects/comfy-meta-viewer`, исходная рев
 
 В исходном адаптере high-level результат связан с промптами VEIL. В SDK этот
 слой заменён схемой вызывающего проекта и локальной JSON Schema validation.
-AGPL-3.0-only и исходный LICENSE сохранены. SDK не включает бинарники, токены,
+Лицензия нашего SDK пока не выбрана; уведомления сторонних зависимостей сохраняются. SDK не включает нативные бинарники Antigravity, токены,
 профиль, настройки, инструкции Create, БД или историю VEIL.
 
 ## Владение и время жизни
@@ -46,6 +46,8 @@ Cancel RPC выполняется с отдельным коротким timeout
 
 - `Client.chat`, `generate`: только finish, независимый объектный результат,
   media attachments, нативный reasoning override, события и usage.
+- `Client.complete`: буквальный planner text без finish и без инструментов.
+- `EditorSession`: независимые Supercomplete / Tab-to-Jump, снимки, raw frames и проверенный preview.
 - `Client.generate_image`: только generate_image и finish; planner и image model
   учитываются отдельно; expected_model — assertion, не выдуманный model parameter.
 - `Client.models`, `authentication`: native discovery без продуктовой политики.

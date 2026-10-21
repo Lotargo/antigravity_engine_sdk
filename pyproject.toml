@@ -5,12 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "antigravity-engine-sdk"
 version = "0.2.0"
-description = "Python SDK for the installed native Antigravity engine"
+description = "Python SDK for native Antigravity: text, vision, image generation and editor commands"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+license-files = []
 dependencies = ["jsonschema>=4.18,<5"]
+
+[project.urls]
+Homepage = "https://github.com/Lotargo/antigravity_engine_sdk"
+Documentation = "https://github.com/Lotargo/antigravity_engine_sdk/tree/main/docs"
+Releases = "https://github.com/Lotargo/antigravity_engine_sdk/releases"
+Issues = "https://github.com/Lotargo/antigravity_engine_sdk/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.8,<1", "build>=1,<2"]

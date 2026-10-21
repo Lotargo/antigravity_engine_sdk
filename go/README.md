@@ -3,7 +3,6 @@
 Нативная Go-версия SDK `0.5.0`. Модуль:
 `github.com/Lotargo/antigravity_engine_sdk/go`. Python и agy CLI не нужны.
 Go 1.23+, для live — установленный Antigravity 2.x с выполненным входом.
-Лицензия AGPL-3.0-only, см. [LICENSE](LICENSE).
 
 ## Быстрая проверка без приложения
 
@@ -20,7 +19,7 @@ JSON Schema, media, отмена, concurrent metadata, восстановлен�
 artifacts. Mock подтверждает локальный протокол; inference проверяется отдельно.
 
 ```powershell
-cd F:\projects\antigravity_engine_sdk\go
+cd go
 go test ./...
 go vet ./...
 go run ./testbench --live --case catalog
@@ -35,12 +34,19 @@ image generation запускается отдельно. ID выбираетс�
 
 ## Подключение
 
-Пока модуль не опубликован, добавьте локальный replace в `go.mod` потребителя:
+Установка опубликованной версии (tag `go/v0.5.0` для вложенного модуля):
+
+```shell
+go get github.com/Lotargo/antigravity_engine_sdk/go@v0.5.0
+```
+
+Для приватного репозитория требуется GitHub-доступ и `GOPRIVATE=github.com/Lotargo/*`.
+Для работы с checkout можно добавить локальный replace в `go.mod` потребителя:
 
 ```go
-require github.com/Lotargo/antigravity_engine_sdk/go v0.0.0
+require github.com/Lotargo/antigravity_engine_sdk/go v0.5.0
 
-replace github.com/Lotargo/antigravity_engine_sdk/go => F:/projects/antigravity_engine_sdk/go
+replace github.com/Lotargo/antigravity_engine_sdk/go => ../antigravity_engine_sdk/go
 ```
 
 ```go

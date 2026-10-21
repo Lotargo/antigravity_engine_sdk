@@ -1,4 +1,12 @@
-include LICENSE README.md
-recursive-include docs *.md
+include README.md README.ru.md THIRD_PARTY.md CHANGELOG.md
+recursive-include docs *.md *.jpg
 recursive-include examples *.py
 recursive-include tests *.py
+recursive-include go *.go *.mod *.sum *.md *.js *.html *.css *.txt *.json *.mjs *.ps1
+recursive-include python *.py *.md
+recursive-include scripts *.py
+prune go/testbench/bin
+prune go/reports
+prune go/testbench/reports
+prune go/testbench/frontend/node_modules
+global-exclude *.py[cod]

@@ -1,299 +1,186 @@
 # Antigravity Engine SDK
 
-Python SDK для прямого подключения к установленному нативному движку Antigravity 2.x.
-Извлечён из рабочего адаптера VEIL; исходный проект остаётся независимым.
+**Python and Go clients for the installed native Antigravity engine — with one browser testbench for both.**
 
-Текущая версия Python SDK: **0.2.0**.
+[Русский](README.ru.md) · [Documentation](docs/README.md) · [Releases](https://github.com/Lotargo/antigravity_engine_sdk/releases) · [Changelog](CHANGELOG.md) · [Python API](docs/PYTHON.md) · [Go API](go/README.md)
 
-SDK запускает `language_server` самостоятельно, использует существующий вход
-Antigravity через системное хранилище и общается с процессом через локальный
-Connect JSON RPC. Работает без запуска Desktop и без agy CLI.
+Use your existing Antigravity sign-in to run text, structured output, vision,
+image generation and native editor commands. Each SDK starts and owns its native
+`language_server` process and talks to it over local Connect JSON RPC.
+The Antigravity desktop app and agy CLI do not need to be running.
 
-Нативная **Go-версия**: [go/README.md](go/README.md).
-Отдельный тестовый стенд с mock/live режимами: [go/testbench/](go/testbench/README.md).
-Общий браузерный интерфейс с переключением Python / Go SDK:
-[python/testbench/](python/testbench/README.md).
+| Component | Version | Requirements |
+| --- | --- | --- |
+| Python SDK | **0.2.0** | Python 3.10+ and `jsonschema` |
+| Go SDK | **0.5.0** | Go 1.23+ to build applications |
+| Shared testbench | Included | Python + built Go backend, or the Windows bundle |
+| Native engine | **2.24.0 verified** | Installed Antigravity and an existing sign-in |
 
-## Установка
+## Try the shared testbench
 
-Python 3.10+, установленный Antigravity 2.x и выполненный хотя бы один раз вход
-в Antigravity. SDK не распространяет сам движок.
+Select **Python SDK** or **Go SDK** without changing pages. Compare the same
+prompt, image or code; each result shows its SDK, version and duration.
+
+![Shared Python and Go testbench: model selection, image attachment and a real vision result](docs/assets/chat-vision.jpg)
+
+From a source checkout on Windows:
 
 ```powershell
-python -m pip install "F:\projects\antigravity_engine_sdk"
-```
-
-Для разработки:
-
-```powershell
-cd F:\projects\antigravity_engine_sdk
+git clone https://github.com/Lotargo/antigravity_engine_sdk.git
+cd antigravity_engine_sdk
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip install ".[dev]"
+go -C go build -o testbench/bin/antigravity-testbench-shared.exe ./testbench
+.\.venv\Scripts\python.exe python/testbench/server.py
 ```
 
-Дополнительная runtime-зависимость — `jsonschema` для локальной проверки результата.
-Flask, Pydantic, ComfyUI, файлы VEIL и установленный agy CLI не требуются.
+Open [the editor](http://127.0.0.1:8773/editor) or [chat and vision](http://127.0.0.1:8773/).
+Choose another port with `--listen 127.0.0.1:8774` when necessary.
 
-## Текст и каталог моделей
+For a ready-built Windows testbench, download the shared testbench ZIP from
+the [Python release](https://github.com/Lotargo/antigravity_engine_sdk/releases/tag/v0.2.0).
+It includes the Go backend and local UI assets; Go and Node.js are not needed.
+Python and the installed native Antigravity engine are still required.
 
-Каждый `client.models()` заново запрашивает каталог у провайдера через движок;
-SDK не хранит чёрный список по результатам прошлых запросов. Добавления и удаления
-провайдера видны при следующем вызове. Внутренние записи можно включить через
-`include_internal=True`. Наличие модели в каталоге не гарантирует успешный ответ:
-временная загрузка, квоты и поддержка нужного формата проверяются при выполнении.
-Ошибка одного запроса не исключает модель из каталога и не запрещает новую попытку.
-Фильтры задач и интерфейса остаются в приложении, использующем SDK.
+[Setup guide](docs/GETTING_STARTED.md) · [Testbench guide](docs/TESTBENCH.md)
+
+## What is available
+
+| Capability | Python | Go |
+| --- | --- | --- |
+| Fresh model catalog | `models()` | `Models()` |
+| Text through native `finish` | `chat()` | `Chat()` |
+| Object JSON Schema and vision | `generate()` + `Media` | `Generate()` + `Media` |
+| Literal text without tools | `complete()` | `Complete()` |
+| Native image generation | `generate_image()` | `GenerateImage()` |
+| Independent Supercomplete | `EditorSession.supercomplete()` | `EditorSession.Supercomplete()` |
+| Independent Tab-to-Jump | `EditorSession.tab_to_jump()` | `EditorSession.TabToJump()` |
+| Cancellation, deadlines and progress | Yes | Yes |
+| Native trajectory, usage and raw RPC | Yes | Yes |
+
+`chat()` and `generate()` require a real native `finish` result.
+`complete()` is a separate contract for literal planner text, including `tab_*`
+preview models. There is no automatic format or model fallback.
+
+## Python quick start
+
+Install from the checkout with `python -m pip install .`, or download and install
+the wheel from the [Python release](https://github.com/Lotargo/antigravity_engine_sdk/releases/tag/v0.2.0).
+The package is distributed through GitHub Releases; these instructions do not
+require a PyPI publication.
 
 ```python
 from antigravity_engine_sdk import Client
 
 with Client() as client:
-    models = client.models()  # Не вызывает генерацию.
-    for model in models:
-        print(model.id, model.name, model.supports_images)
+    models = client.models()  # Catalog only; no generation.
+    print([model.id for model in models])
 
-    # Выберите точный ID из каталога вашего аккаунта.
-    selected_model = "gemini-3.8-flash-low"
-    result = client.chat("Объясни принцип работы объектива в двух предложениях.", model=selected_model)
+    result = client.chat(
+        "Explain a camera lens in two sentences.",
+        model="gemini-3.8-flash-low",  # Select an exact ID from your catalog.
+    )
     print(result.text)
     print(result.usage)
 ```
 
-Импорт и вход в контекст не запускают процесс; первый запрос запускает движок.
-Один `Client` переиспользует свой процесс до `close()` или выхода из `with`.
-Разные клиенты имеют отдельные процессы. Вызовы одного клиента выполняются
-последовательно; каждый high-level запрос получает новую беседу и временную
-рабочую папку. История между `chat()` не переносится автоматически.
+[Full Python API guide](docs/PYTHON.md) · [Runnable examples](examples/)
 
-## Структурированный ответ и vision
+## Go quick start
 
-```python
-from antigravity_engine_sdk import Client, Media
+```shell
+go get github.com/Lotargo/antigravity_engine_sdk/go@v0.5.0
+```
 
-schema = {
-    "type": "object",
-    "properties": {
-        "description": {"type": "string"},
-        "colors": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["description", "colors"],
-    "additionalProperties": False,
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    ag "github.com/Lotargo/antigravity_engine_sdk/go"
+)
+
+func main() {
+    client, err := ag.NewClient(ag.Config{})
+    if err != nil { log.Fatal(err) }
+    defer client.Close()
+
+    result, err := client.Chat(context.Background(), ag.Request{
+        Prompt: "Explain a camera lens in two sentences.",
+        Model:  "gemini-3.8-flash-low",
+    })
+    if err != nil { log.Fatal(err) }
+    text, err := result.Text()
+    if err != nil { log.Fatal(err) }
+    fmt.Println(text)
 }
-
-with Client() as client:
-    result = client.generate(
-        "Опиши изображение и перечисли основные цвета.",
-        model="gemini-3.8-flash-low",
-        schema=schema,
-        media=[Media.from_file("photo.png")],
-        instructions="Будь краток. Отделяй наблюдения от предположений.",
-    )
-    print(result.output)
 ```
 
-Принимается object JSON Schema, включая локальные `$defs`/`$ref`; внешние ссылки
-не поддерживаются. Ответ обязательно приходит через нативный `finish`, после
-чего SDK повторно проверяет JSON и схему локально. Текст планировщика не
-подменяет результат. `chat()` использует тот же механизм с полем `text`.
+Go runs independently of Python. The nested module uses the Git tag
+[`go/v0.5.0`](https://github.com/Lotargo/antigravity_engine_sdk/releases/tag/go%2Fv0.5.0).
+Private repository access requires Git credentials and `GOPRIVATE`; see the
+[setup guide](docs/GETTING_STARTED.md#private-repository-access).
 
-`media` принимает несколько `Media` с байтами и MIME type, до 20 MiB на элемент.
-Поддержка конкретных форматов зависит от модели; `supports_images` берётся из
-нативного каталога. SDK проверяет наличие media в возвращённом user-input шаге.
+[Full Go API guide](go/README.md) · [Standalone Go testbench](go/testbench/README.md)
 
-## Обычный текст без finish
+## Native code editing
 
-`complete()` — отдельный режим для моделей, которым не подходит инструмент
-`finish`, в том числе `tab_*` preview. Он возвращает буквальный завершённый текст
-планировщика; не разбирает и не исправляет сгенерированный код. Schema не
-принимается, инструменты не включены, по умолчанию `max_invocations=1`.
-`chat()` и `generate()` продолжают требовать настоящий `finish`; fallback нет.
+Load a UTF-8 code file, keep its baseline, place the cursor and run
+**Supercomplete** or **Tab-to-Jump**. Both commands can be started manually after
+a pause, without a new edit. Suggestions are previewed before application.
 
-```python
-with Client() as client:
-    result = client.complete("def add(a, b):\n    return", model="tab_flash_lite_preview")
-    print(result.text, result.output_mode)  # planner_text
+The editor includes syntax highlighting, line numbers, search, undo/redo,
+visible jump targets and download of the current file under its original name.
+Switching SDK preserves the code and cursor; sessions and last results are
+separate for each SDK. Initialize the baseline once in each SDK.
+
+<details>
+<summary>Supercomplete: native diff and editable preview</summary>
+
+![Supercomplete through Go SDK in the shared editor](docs/assets/supercomplete.jpg)
+
+</details>
+
+<details>
+<summary>Tab-to-Jump: native position and highlighted cursor target</summary>
+
+![Python Tab-to-Jump moving the cursor to line 29, column 22](docs/assets/tab-to-jump.jpg)
+
+</details>
+
+## Compatibility and validation
+
+The SDK uses an internal engine protocol and is an independent project, not an
+official Google SDK. Native acceptance was performed on **Windows / Antigravity
+2.24.0**. Linux/macOS discovery paths exist, but native operation on those
+platforms has not been verified. Independent editor preparation is guarded for
+the verified native version.
+
+Model availability comes from your account's live catalog. Suggestions can be
+empty, filtered or incorrect; review native edits before applying them.
+Editor token usage and cancelled request usage remain **UNKNOWN** when the
+native engine does not report them. Reported durations are observations, not
+a performance ranking of SDKs or models.
+
+The current local checks include **100 SDK/stand tests and 4 packaging tests**, the Go test suite and
+live checks of both SDKs through the shared UI.
+[Validation records](docs/README.md#validation-records) distinguish protocol
+tests from real native calls.
+
+## Project layout
+
+```text
+src/antigravity_engine_sdk/   Python package
+go/                          Independent Go module and standalone testbench
+python/testbench/            Shared Python / Go browser launcher
+examples/                    Python examples and opt-in native probes
+docs/                        Guides, screenshots and validation records
+scripts/                     Release packaging
 ```
 
-## Supercomplete и Tab-to-Jump
-
-Редакторный API возвращает нативный diff и позицию курсора через другой RPC,
-чем текстовый `complete()`. `EditorSession` хранит последние два различных
-фактических снимка. `sync()` не вызывает генерацию, а повтор того же текста
-сохраняет исходное время наблюдения. Одного снимка достаточно для ручного вызова.
-
-```python
-from antigravity_engine_sdk import EditorDocument, EditorError, EditorSession
-
-text = "def add(a, b):\n    return \n"
-doc = EditorDocument("sample.py", "python", text,
-                     cursor_offset=len("def add(a, b):\n    return ".encode("utf8")))
-with EditorSession() as editor:
-    editor.sync(doc)
-    # Можно ждать сколько угодно: новую правку делать необязательно.
-    try:
-        result = editor.supercomplete()
-        if result.status == "edit":
-            changed = result.preview(doc.text)  # Проверка точного исходника, без записи на диск.
-        jump = editor.tab_to_jump()  # Не требует предварительного Supercomplete.
-        if jump.status == "jump":
-            print(jump.response.jump_position)  # row/col: zero-based позиции редактора.
-    except EditorError as error:
-        print(error.code, error.result.to_dict())  # Включая частичные кадры.
-```
-
-`cursor_offset` задаётся в байтах UTF-8 на границе символа. Нативные `row/col`
-используются как позиции IDE; CodeMirror преобразует свои смещения UTF-16 в
-байтовый offset запроса. `preview()` сверяет SHA-256 и весь исходный текст
-выбранного диапазона, сохраняет CRLF/Unicode и отвергает незавершённые или
-устаревшие правки. Ничего автоматически не применяется и не записывается в проект.
-
-Ручные команды запускают отдельный временный процесс, подготавливают контекст
-без генерации на пустом служебном файле и загружают реальные снимки. Затем
-выполняется один запрос выбранной команды. Подготовка поддержана только на
-проверенном native **2.24.0**; другая версия или data frame bootstrap останавливают
-вызов. Оригинальные времена, bootstrap и буквальные JSON-кадры сохраняются отдельно
-в `EditorResult`; `to_dict()` сохраняет и разобранные кадры, и исходные JSON-строки.
-
-`supercomplete_native()` / `tab_to_jump_native()` сохраняют автоматический путь
-с нативным окном недавней правки; автоматической паре нужен предварительный
-`supercomplete_native()`. Ручные методы эту пару не подготавливают.
-`cancelled=event.is_set`, `timeout=` и `close()` прерывают активный поток;
-callback `on_frame` выполняется синхронно. Usage редактора остаётся `UNKNOWN`.
-Запрошенные `tab_flash_lite_preview` / `tab_jump_flash_lite_preview` каждый раз
-разрешаются через свежий каталог; точную реально выбранную модель RPC не подтверждает.
-
-## Reasoning, прогресс и отмена
-
-```python
-from threading import Event
-from antigravity_engine_sdk import AntigravityError, Client
-
-stop = Event()  # В обработчике кнопки Stop вызовите stop.set().
-
-with Client(timeout=180) as client:
-    try:
-        result = client.chat(
-            "Реши задачу и объясни ответ: 17 * 23.",
-            model="gemini-3-flash",  # Точный ID из вашего каталога.
-            thinking="high",
-            cancelled=stop.is_set,
-            on_progress=lambda event: print(event.phase),
-        )
-        print(result.text)
-    except AntigravityError as error:
-        print(error.code, str(error))
-```
-
-`thinking` — `minimal`, `low`, `medium`, `high`; отсутствие значения сохраняет
-нативные настройки. Каталожные варианты `*-low/medium/high` используются как
-точные IDs. Поддержка override зависит от модели: у Claude предпочтительны
-каталожные варианты, GPT-OSS в проверенном движке не принимал `minimal`.
-SDK не придумывает и не пересобирает идентификаторы моделей.
-
-`on_progress` получает `ProgressEvent` с фазами `starting`, `working`, `trajectory`,
-`completed`. `trajectory` содержит снимок нативных шагов, включая доступный текст
-и метаданные. Это polling, а не поток токенов. Callback выполняется синхронно;
-не вызывайте этот же клиент из callback.
-
-Срок запроса включает ожидание очереди, запуск и RPC. Отмена отправляет
-`CancelCascadeInvocation`. Если остановку нельзя подтвердить успешным RPC,
-SDK закрывает принадлежащий клиенту процесс. После обычной отмены клиент можно
-использовать снова. `close()` терминален и останавливает активную работу клиента.
-
-## Генерация изображений
-
-```python
-from antigravity_engine_sdk import Client
-
-with Client(timeout=180) as client:
-    result = client.generate_image(
-        "A blue ceramic cup with a yellow triangle on a white table. One square image.",
-        planner="gemini-3.8-flash-low",
-        expected_model="gemini-3.1-flash-image",
-    )
-    result.images[0].save("cup.jpg")  # Расширение выбирайте по artifact.mime_type.
-```
-
-Здесь `planner` — текстовая модель, которая вызывает нативный `generate_image`.
-`expected_model` проверяет модель, указанную в ответе инструмента; это не параметр
-принудительного выбора image-модели. У проверенного 2.23.1 инструмент не
-предоставлял такого параметра. SDK требует настоящий image step и байты
-изображения, сохраняет байты в результате до удаления временных файлов и
-никогда не перезаписывает существующий файл через `ImageArtifact.save()`.
-Внешние URI результата не скачиваются и не читаются как локальные файлы.
-
-Reference media можно передать через `media`; точность редактирования,
-multi-view и доступность других image-моделей требуют отдельной проверки.
-
-## Доступ к движку без ограничения high-level API
-
-```python
-from antigravity_engine_sdk import Client, Engine, find_installation
-
-with Client() as client:
-    native = client.rpc("GetAvailableModels")
-
-installation = find_installation()
-if installation:
-    with Engine(installation, timeout=60) as engine:
-        response = engine.rpc("GetAvailableModels")
-```
-
-`Client.rpc()` даёт доступ к внутренним методам движка. Для собственных бесед,
-инструментов, продолжения cascade и иных возможностей используйте `Engine.rpc()`
-и текущую схему протокола. Неподтверждённые поля движок может молча игнорировать.
-High-level API разрешает только `finish` либо `generate_image` + `finish`.
-Произвольный RPC находится под управлением вызывающего проекта.
-
-`client.rpc("GetAvailableModels", concurrent=True)` позволяет прочитать метаданные
-из уже запущенного движка, пока агент генерирует ответ. Это опция с версии 0.1.1;
-по умолчанию RPC по-прежнему сериализованы. Для изменяющих состояние методов
-порядок и допустимость параллельного вызова определяет вызывающий проект.
-
-Нестандартная установка: `Client(executable=".../resources/bin/language_server.exe")`
-или переменная `ANTIGRAVITY_ENGINE_PATH`. Можно передать явный
-`Installation(executable, version)` для собственного обнаружения.
-
-## Ошибки и совместимость
-
-`AntigravityError.code` различает `engine_unavailable`, `authentication_required`,
-`engine_connection`, `engine_exited`, `timeout`, `cancelled`, `client_closed`,
-`invalid_input`, `invalid_schema`, `model_unavailable`, `incompatible_image_input`,
-`provider_error`, `content_rejected`, `incompatible_format`, `contract_violation`,
-`image_missing`, `image_model_mismatch`. `details` сохраняет диагностический контекст;
-результат, trajectory и details могут содержать текст запроса — храните их осознанно.
-
-`Result` содержит output/raw_output и его SHA-256 (`raw_response_sha256`), trajectory,
-cascade ID, исходный и нативный ID модели, версию движка, длительность и usage. Usage сохраняет нативные поля,
-включая строковые счётчики; область учёта — `trajectory_model_steps`.
-Это не общий расход аккаунта. Usage отменённых запросов и цена изображений
-неизвестны, SDK не записывает их как нулевые.
-
-В основе лежит внутренний протокол Antigravity, а не официальный публичный Google
-SDK. Исходный адаптер проверен на Windows / Antigravity 2.23.1; выделенный SDK
-прошёл live-проверку на Antigravity 2.24.0. Пути обнаружения
-Linux/macOS сохранены; native acceptance этих платформ отсутствует. После
-обновлений движка может потребоваться адаптация. В SDK намеренно нет устаревающего
-списка «запрещённых» моделей: каталог не гарантирует доступную inference capacity.
-
-Подробности происхождения и границ: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Результаты проверки этого выделения: [docs/VALIDATION-2026-10-21.md](docs/VALIDATION-2026-10-21.md).
-
-Лицензия сохранена от исходного кода: AGPL-3.0-only, см. [LICENSE](LICENSE).
-
-## Проверка каталога и времени ответа
-
-```powershell
-python examples/benchmark_catalog.py --live --output reports/catalog-new
-```
-
-Прогон сохраняет исходный каталог, ответ/ошибку каждого ID, native trajectories,
-latency и usage. Запуск движка измеряется отдельно от прогретых запросов.
-Image-модели проверяются через image tool; presence в каталоге само по себе
-не подтверждает работоспособность. `--only <id>` ограничивает прогон;
-`--prompt-file`, `--schema-file` и `--marker` позволяют использовать реальные
-контракты вызывающего приложения. Обычный текст вместо finish отмечается как
-несовместимый результат, а не принимается за структурированный ответ.
-`--repeat-model <id> --repeat-count 3` добавляет повторные замеры.
-Это реальные model calls; результаты отражают конкретный движок и нагрузку сервера.
+The native Antigravity executable, account credentials and user profile are not
+distributed. No SDK license is selected for this release; third-party notices
+are retained in [THIRD_PARTY.md](THIRD_PARTY.md).
