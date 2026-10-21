@@ -120,7 +120,7 @@ func (a *uiServer) handler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = t.Execute(w, struct{ Token string }{a.token})
+		_ = t.Execute(w, struct{ Token, SDKLabel string }{a.token, "Go"})
 	})
 	for _, asset := range []string{"app.js", "editor.js", "style.css", "editor.css", "code-editor.js", "editor-licenses.txt"} {
 		name := asset
@@ -148,12 +148,12 @@ func (a *uiServer) handler() http.Handler {
 			styleNonce := randomID()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Content-Security-Policy", strings.Replace(w.Header().Get("Content-Security-Policy"), "style-src 'self'", "style-src 'self' 'nonce-"+styleNonce+"'", 1))
-			_ = t.Execute(w, struct{ Token, StyleNonce string }{a.token, styleNonce})
+			_ = t.Execute(w, struct{ Token, StyleNonce, SDKLabel string }{a.token, styleNonce, "Go"})
 		})
 		a.editor.routes(mux)
 	}
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, sdk.Object{"mode": a.mode, "model": a.model, "version": sdk.Version, "max_media_bytes": sdk.MaxMediaBytes})
+		writeJSON(w, 200, sdk.Object{"mode": a.mode, "model": a.model, "version": sdk.Version, "sdk_language": "Go", "max_media_bytes": sdk.MaxMediaBytes})
 	})
 	mux.HandleFunc("GET /api/models", func(w http.ResponseWriter, r *http.Request) {
 		// Fresh catalog even while a high-level request owns the inference lock.

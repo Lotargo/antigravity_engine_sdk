@@ -87,6 +87,7 @@ class Result:
     usage: tuple[dict[str, Any], ...]
     images: tuple[ImageArtifact, ...] = ()
     usage_scope: str = "trajectory_model_steps"
+    output_mode: str = "native_finish"
 
     @property
     def raw_response_sha256(self) -> str:

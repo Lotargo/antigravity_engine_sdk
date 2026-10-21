@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from antigravity_engine_sdk import AntigravityError, Media
+from antigravity_engine_sdk import AntigravityError, Media, Session
 
 SCHEMA = {
     "type": "object",
@@ -287,6 +287,63 @@ def test_timeout_cancels_and_close_is_terminal(boundary):
     with pytest.raises(AntigravityError) as caught:
         client.models()
     assert caught.value.code == "client_closed"
+
+
+@pytest.mark.parametrize(
+    "cause,budget,rpc_timeout,code",
+    [
+        (TimeoutError("socket timer"), 1, 10, "timeout"),
+        (TimeoutError("short RPC timer"), 10, 1, "engine_connection"),
+        (ConnectionRefusedError("refused"), 1, 10, "engine_connection"),
+    ],
+)
+def test_socket_timeout_classification_preserves_request_scope(
+    cause, budget, rpc_timeout, code
+):
+    class Engine:
+        def check(self):
+            pass
+
+        def rpc(self, *_, **__):
+            raise AntigravityError(
+                "transport error", code="engine_connection"
+            ) from cause
+
+    session = Session(Engine(), timeout=budget)
+    with pytest.raises(AntigravityError) as error:
+        session.rpc("GetAvailableModels", timeout=rpc_timeout)
+    assert error.value.code == code
+
+
+def test_concurrent_catalog_waits_for_cold_engine_authorization(boundary):
+    boundary.set("auth_paused")
+    client = boundary.client()
+    results, errors = [], []
+
+    def read(concurrent):
+        try:
+            results.append(client.models(concurrent=concurrent))
+        except Exception as error:
+            errors.append(error)
+
+    first = threading.Thread(target=read, args=(False,))
+    second = threading.Thread(target=read, args=(True,))
+    first.start()
+    try:
+        deadline = time.monotonic() + 4
+        while not boundary.calls("HasAuthToken") and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert boundary.calls("HasAuthToken")
+        second.start()
+        time.sleep(0.1)
+        assert not boundary.calls("GetAvailableModels")
+    finally:
+        boundary.config.with_suffix(".ready").touch()
+        first.join(timeout=5)
+        if second.ident is not None:
+            second.join(timeout=5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors and len(results) == 2 and len(boundary.processes) == 1
 
 
 def test_startup_timeout_closes_owned_process(boundary):

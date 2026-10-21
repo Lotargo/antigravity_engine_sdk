@@ -135,7 +135,7 @@ $('download').addEventListener('click', async () => {
   try {
     state.config = await api('/api/config');
     $('mode').textContent = state.config.mode === 'live' ? 'Реальный движок' : 'Mock · без вызова модели';
-    $('footer').textContent = `Локальный тестовый стенд · Go SDK ${state.config.version} · ${state.config.mode === 'live' ? 'Генерация запускается кнопкой «Отправить запрос»' : 'Ответы mock — тестовые данные'}`;
+    $('footer').textContent = `Локальный тестовый стенд · ${state.config.sdk_language || 'Go'} SDK ${state.config.version} · ${state.config.mode === 'live' ? 'Генерация запускается кнопкой «Отправить запрос»' : 'Ответы mock — тестовые данные'}`;
     renderJob(await api('/api/request'));
     if (state.job) $('prompt').value = state.job.prompt;
 	if (state.job) $('response-mode').value=state.job.response_mode || 'finish';

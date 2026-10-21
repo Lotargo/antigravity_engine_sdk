@@ -3,12 +3,16 @@
 Python SDK для прямого подключения к установленному нативному движку Antigravity 2.x.
 Извлечён из рабочего адаптера VEIL; исходный проект остаётся независимым.
 
+Текущая версия Python SDK: **0.2.0**.
+
 SDK запускает `language_server` самостоятельно, использует существующий вход
 Antigravity через системное хранилище и общается с процессом через локальный
 Connect JSON RPC. Работает без запуска Desktop и без agy CLI.
 
 Нативная **Go-версия**: [go/README.md](go/README.md).
 Отдельный тестовый стенд с mock/live режимами: [go/testbench/](go/testbench/README.md).
+Тот же браузерный интерфейс с прямым Python backend:
+[python/testbench/](python/testbench/README.md).
 
 ## Установка
 
@@ -96,6 +100,68 @@ with Client() as client:
 `media` принимает несколько `Media` с байтами и MIME type, до 20 MiB на элемент.
 Поддержка конкретных форматов зависит от модели; `supports_images` берётся из
 нативного каталога. SDK проверяет наличие media в возвращённом user-input шаге.
+
+## Обычный текст без finish
+
+`complete()` — отдельный режим для моделей, которым не подходит инструмент
+`finish`, в том числе `tab_*` preview. Он возвращает буквальный завершённый текст
+планировщика; не разбирает и не исправляет сгенерированный код. Schema не
+принимается, инструменты не включены, по умолчанию `max_invocations=1`.
+`chat()` и `generate()` продолжают требовать настоящий `finish`; fallback нет.
+
+```python
+with Client() as client:
+    result = client.complete("def add(a, b):\n    return", model="tab_flash_lite_preview")
+    print(result.text, result.output_mode)  # planner_text
+```
+
+## Supercomplete и Tab-to-Jump
+
+Редакторный API возвращает нативный diff и позицию курсора через другой RPC,
+чем текстовый `complete()`. `EditorSession` хранит последние два различных
+фактических снимка. `sync()` не вызывает генерацию, а повтор того же текста
+сохраняет исходное время наблюдения. Одного снимка достаточно для ручного вызова.
+
+```python
+from antigravity_engine_sdk import EditorDocument, EditorError, EditorSession
+
+text = "def add(a, b):\n    return \n"
+doc = EditorDocument("sample.py", "python", text,
+                     cursor_offset=len("def add(a, b):\n    return ".encode("utf8")))
+with EditorSession() as editor:
+    editor.sync(doc)
+    # Можно ждать сколько угодно: новую правку делать необязательно.
+    try:
+        result = editor.supercomplete()
+        if result.status == "edit":
+            changed = result.preview(doc.text)  # Проверка точного исходника, без записи на диск.
+        jump = editor.tab_to_jump()  # Не требует предварительного Supercomplete.
+        if jump.status == "jump":
+            print(jump.response.jump_position)  # row/col: zero-based позиции редактора.
+    except EditorError as error:
+        print(error.code, error.result.to_dict())  # Включая частичные кадры.
+```
+
+`cursor_offset` задаётся в байтах UTF-8 на границе символа. Нативные `row/col`
+используются как позиции IDE; CodeMirror преобразует свои смещения UTF-16 в
+байтовый offset запроса. `preview()` сверяет SHA-256 и весь исходный текст
+выбранного диапазона, сохраняет CRLF/Unicode и отвергает незавершённые или
+устаревшие правки. Ничего автоматически не применяется и не записывается в проект.
+
+Ручные команды запускают отдельный временный процесс, подготавливают контекст
+без генерации на пустом служебном файле и загружают реальные снимки. Затем
+выполняется один запрос выбранной команды. Подготовка поддержана только на
+проверенном native **2.24.0**; другая версия или data frame bootstrap останавливают
+вызов. Оригинальные времена, bootstrap и буквальные JSON-кадры сохраняются отдельно
+в `EditorResult`; `to_dict()` сохраняет и разобранные кадры, и исходные JSON-строки.
+
+`supercomplete_native()` / `tab_to_jump_native()` сохраняют автоматический путь
+с нативным окном недавней правки; автоматической паре нужен предварительный
+`supercomplete_native()`. Ручные методы эту пару не подготавливают.
+`cancelled=event.is_set`, `timeout=` и `close()` прерывают активный поток;
+callback `on_frame` выполняется синхронно. Usage редактора остаётся `UNKNOWN`.
+Запрошенные `tab_flash_lite_preview` / `tab_jump_flash_lite_preview` каждый раз
+разрешаются через свежий каталог; точную реально выбранную модель RPC не подтверждает.
 
 ## Reasoning, прогресс и отмена
 

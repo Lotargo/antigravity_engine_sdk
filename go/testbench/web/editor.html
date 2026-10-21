@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="testbench-token" content="{{.Token}}"><meta name="editor-style-nonce" content="{{.StyleNonce}}"><title>Native Editor — Antigravity Go</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/editor.css"><script type="module" src="/editor.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="testbench-token" content="{{.Token}}"><meta name="editor-style-nonce" content="{{.StyleNonce}}"><title>Native Editor — Antigravity {{.SDKLabel}}</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/editor.css"><script type="module" src="/editor.js"></script></head>
 <body><main>
-<header><div><p class="eyebrow">ANTIGRAVITY · GO SDK</p><h1>Supercomplete и Tab-to-Jump</h1><p>Нативные правки и переход курсора. Все изменения остаются в этом редакторе.</p></div><a href="/">Чат и изображения</a></header>
+<header><div><p class="eyebrow">ANTIGRAVITY · {{.SDKLabel}} SDK</p><h1>Supercomplete и Tab-to-Jump</h1><p>Нативные правки и переход курсора. Все изменения остаются в этом редакторе.</p></div><a href="/">Чат и изображения</a></header>
 <section class="card">
 <p>1. Выберите свой файл кода или загрузите пример. 2. Запомните исходную версию и установите курсор в текущем коде. 3. Запустите Supercomplete или Tab-to-Jump. Менять код перед запросом необязательно.</p>
 <p>Обе команды используют сохранённые снимки кода и работают после паузы, без новой правки. Подготовка контекста занимает несколько секунд. Модель может вернуть пустой результат или отфильтровать подсказку.</p>

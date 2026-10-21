@@ -65,7 +65,7 @@ def _check(deadline: float, cancelled: Callable[[], bool] | None) -> None:
         raise AntigravityError("Antigravity request timed out.", code="timeout")
 
 
-def _finish(trajectory: dict) -> str:
+def _trajectory_error(trajectory: dict) -> None:
     steps = trajectory.get("steps", [])
     for step in steps:
         if "ERROR" in step.get("type", "") or step.get("status") in {
@@ -79,6 +79,42 @@ def _finish(trajectory: dict) -> str:
                 code="content_rejected" if blocked else "provider_error",
                 details=detail,
             )
+
+
+def _planner_text(trajectory: dict) -> str:
+    _trajectory_error(trajectory)
+    parts = []
+    for step in trajectory.get("steps", []):
+        message = step.get("plannerResponse", {}).get("response", "")
+        if isinstance(message, str) and any(
+            marker in message.casefold()
+            for marker in (
+                "is no longer available",
+                "is no longer supported",
+                "has been retired",
+            )
+        ):
+            raise AntigravityError(
+                "Selected model has been retired.", code="model_unavailable"
+            )
+        if (
+            step.get("type") == "CORTEX_STEP_TYPE_PLANNER_RESPONSE"
+            and step.get("status")
+            not in {"CORTEX_STEP_STATUS_RUNNING", "CORTEX_STEP_STATUS_PENDING"}
+            and isinstance(message, str)
+            and message.strip()
+        ):
+            parts.append(message)
+    if not parts:
+        raise AntigravityError(
+            "Engine returned no completed planner text.", code="incompatible_format"
+        )
+    return "\n".join(parts)
+
+
+def _finish(trajectory: dict) -> str:
+    _trajectory_error(trajectory)
+    steps = trajectory.get("steps", [])
     for step in reversed(steps):
         if step.get("type") == "CORTEX_STEP_TYPE_FINISH" and step.get("status") not in {
             "CORTEX_STEP_STATUS_RUNNING",
@@ -297,11 +333,15 @@ class Client:
         }
 
     def models(
-        self, *, include_internal: bool = False, timeout: float | None = None
+        self,
+        *,
+        include_internal: bool = False,
+        timeout: float | None = None,
+        concurrent: bool = False,
     ) -> tuple[Model, ...]:
         """Return native catalog IDs unchanged, without VEIL-specific exclusions."""
         catalog = (
-            self.rpc("GetAvailableModels", timeout=timeout)
+            self.rpc("GetAvailableModels", timeout=timeout, concurrent=concurrent)
             .get("response", {})
             .get("models", {})
         )
@@ -354,6 +394,40 @@ class Client:
             max_invocations=max_invocations,
         )
 
+    def complete(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        instructions: str = "",
+        media: Sequence[Media] = (),
+        thinking: str | None = None,
+        timeout: float | None = None,
+        cancelled: Callable[[], bool] | None = None,
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+        max_invocations: int = 1,
+        schema: Mapping[str, Any] | None = None,
+    ) -> Result:
+        """Literal planner text with no tools or finish; never an implicit fallback."""
+        if schema is not None:
+            raise AntigravityError(
+                "complete() does not accept a schema; use generate().",
+                code="invalid_input",
+            )
+        return self._execute(
+            prompt,
+            model=model,
+            schema=None,
+            instructions=instructions,
+            media=media,
+            thinking=thinking,
+            timeout=timeout,
+            cancelled=cancelled,
+            on_progress=on_progress,
+            max_invocations=max_invocations,
+            plain_text=True,
+        )
+
     def generate_image(
         self,
         prompt: str,
@@ -395,7 +469,7 @@ class Client:
         prompt: str,
         *,
         model: str,
-        schema: Mapping[str, Any],
+        schema: Mapping[str, Any] | None,
         instructions: str,
         media: Sequence[Media],
         thinking: str | None,
@@ -404,6 +478,7 @@ class Client:
         on_progress: Callable[[ProgressEvent], None] | None,
         max_invocations: int,
         image_generation: bool = False,
+        plain_text: bool = False,
         expected_model: str | None = None,
     ) -> Result:
         started = time.monotonic()
@@ -425,19 +500,23 @@ class Client:
             raise AntigravityError(
                 "max_invocations must be a positive integer.", code="invalid_input"
             )
-        try:
-            schema = json.loads(json.dumps(dict(schema)))
-            if schema.get("type") != "object":
-                raise ValueError("finish requires an object schema")
-            validator_type = validator_for(schema)
-            validator_type.check_schema(schema)
-            # Do not fetch remote $refs during local validation.
-            _local_references(schema)
-            validator = validator_type(schema)
-        except (SchemaError, ValueError, TypeError) as exc:
-            raise AntigravityError(
-                "Invalid object JSON Schema.", code="invalid_schema", details=str(exc)
-            ) from exc
+        validator = None
+        if not plain_text:
+            try:
+                schema = json.loads(json.dumps(dict(schema)))
+                if schema.get("type") != "object":
+                    raise ValueError("finish requires an object schema")
+                validator_type = validator_for(schema)
+                validator_type.check_schema(schema)
+                # Do not fetch remote $refs during local validation.
+                _local_references(schema)
+                validator = validator_type(schema)
+            except (SchemaError, ValueError, TypeError) as exc:
+                raise AntigravityError(
+                    "Invalid object JSON Schema.",
+                    code="invalid_schema",
+                    details=str(exc),
+                ) from exc
         attachments = [item.native() for item in media]
 
         def emit(
@@ -468,7 +547,11 @@ class Client:
                 workspace = Path(directory)
                 generated = workspace / "images"
                 generated.mkdir()
-                tools = ["generate_image", "finish"] if image_generation else ["finish"]
+                tools = (
+                    ["generate_image", "finish"]
+                    if image_generation
+                    else ([] if plain_text else ["finish"])
+                )
                 cascade = session.rpc(
                     "StartCascade",
                     {
@@ -487,9 +570,12 @@ class Client:
                 complete = False
                 try:
                     tool_config = {
-                        "finish": {"resultJsonSchemaString": json.dumps(schema)},
-                        "autoInteractionBehavior": "AUTO_INTERACTION_BEHAVIOR_DENY_ALL",
+                        "autoInteractionBehavior": "AUTO_INTERACTION_BEHAVIOR_DENY_ALL"
                     }
+                    if not plain_text:
+                        tool_config["finish"] = {
+                            "resultJsonSchemaString": json.dumps(schema)
+                        }
                     if image_generation:
                         tool_config["generateImage"] = {
                             "forceDisable": False,
@@ -505,6 +591,10 @@ class Client:
                             "thinkingLevel": THINKING_LEVELS[thinking]
                         }
                     package = f"{instructions}\n\n{prompt}\n\nTRANSPORT OUTPUT\nCall finish with the required result object. Use plain text and real line breaks inside field values. Do not return the object as planner prose. Use only the supplied tools."
+                    if plain_text:
+                        package = (
+                            instructions + "\n\n" + prompt if instructions else prompt
+                        )
                     request = {
                         "cascadeId": cascade,
                         "items": [{"text": package}],
@@ -513,7 +603,7 @@ class Client:
                             "plannerConfig": planner,
                             "executorConfig": {
                                 "maxGeneratorInvocations": max_invocations,
-                                "requireFinishTool": True,
+                                "requireFinishTool": not plain_text,
                             },
                         },
                         "blocking": False,
@@ -560,24 +650,29 @@ class Client:
                         except Exception:
                             # An uncertain cancellation cannot leave work in the background.
                             self._retire(session.engine)
-                raw_output = _finish(trajectory)
-                try:
-                    output = json.loads(raw_output)
-                    validator.validate(output)
-                except (ValueError, ValidationError) as exc:
-                    raise AntigravityError(
-                        "Native finish violates the requested schema.",
-                        code="contract_violation",
-                        details=str(exc),
-                    ) from exc
-                except Exception as exc:
-                    # jsonschema's local-reference resolver uses its own exception
-                    # hierarchy; retain it as a schema error, not a raw library error.
-                    raise AntigravityError(
-                        "A local schema reference could not be resolved.",
-                        code="invalid_schema",
-                        details=str(exc),
-                    ) from exc
+                if plain_text:
+                    raw_output = _planner_text(trajectory)
+                    output = {"text": raw_output}
+                else:
+                    raw_output = _finish(trajectory)
+                    try:
+                        output = json.loads(raw_output)
+                        assert validator is not None
+                        validator.validate(output)
+                    except (ValueError, ValidationError) as exc:
+                        raise AntigravityError(
+                            "Native finish violates the requested schema.",
+                            code="contract_violation",
+                            details=str(exc),
+                        ) from exc
+                    except Exception as exc:
+                        # jsonschema's local-reference resolver uses its own exception
+                        # hierarchy; retain it as a schema error, not a raw library error.
+                        raise AntigravityError(
+                            "A local schema reference could not be resolved.",
+                            code="invalid_schema",
+                            details=str(exc),
+                        ) from exc
                 if attachments and not any(
                     step.get("userInput", {}).get("media") for step in steps
                 ):
@@ -607,6 +702,7 @@ class Client:
                     round((time.monotonic() - started) * 1000),
                     usage,
                     images,
+                    output_mode="planner_text" if plain_text else "native_finish",
                 )
 
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="testbench-token" content="{{.Token}}">
   <meta name="color-scheme" content="light">
-  <title>Antigravity · Go стенд</title>
+  <title>Antigravity · {{.SDKLabel}} стенд</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
@@ -13,7 +13,7 @@
 <body>
 <main>
   <header>
-    <div><h1>Antigravity <span>Go стенд</span></h1><p class="subtitle">Выберите модель и отправьте пробный запрос.</p></div>
+    <div><h1>Antigravity <span>{{.SDKLabel}} стенд</span></h1><p class="subtitle">Выберите модель и отправьте пробный запрос.</p></div>
     <p id="mode" class="mode">Подключение…</p>
   </header>
   <div class="workspace">
@@ -62,7 +62,7 @@
       </details>
     </section>
   </div>
-  <footer id="footer">Локальный тестовый стенд · Go SDK</footer>
+  <footer id="footer">Локальный тестовый стенд · {{.SDKLabel}} SDK</footer>
 </main>
 </body>
 </html>

@@ -145,6 +145,7 @@ class Engine:
         self.root: Path | None = None
         self._lock = threading.RLock()
         self._closed = False
+        self._ready = False
         self._auth_prompt = False
         self._readers: list[threading.Thread] = []
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -152,6 +153,7 @@ class Engine:
     def usable(self) -> bool:
         return (
             not self._closed
+            and self._ready
             and not self._auth_prompt
             and self.process is not None
             and self.process.poll() is None
@@ -279,6 +281,7 @@ class Engine:
                                 "Sign in once in Antigravity 2.0, then press Re-check.",
                                 code="authentication_required",
                             )
+                        self._ready = True
                         return self
                     except AntigravityError as exc:
                         if exc.code not in {"engine_connection", "engine_busy"}:
@@ -412,16 +415,33 @@ class Session:
         self, method: str, payload: dict | None = None, *, timeout: float = 10
     ) -> dict:
         self.check()
+        remaining = self.deadline - time.monotonic()
         try:
             data = self.engine.rpc(
                 method,
                 payload,
-                timeout=max(0.05, min(timeout, self.deadline - time.monotonic())),
+                timeout=max(0.05, min(timeout, remaining)),
             )
         except AntigravityError as exc:
             # A read cut short by this request's own stop or deadline reports that, not the engine.
             if exc.code == "engine_connection":
                 self.check()
+                cause = exc.__cause__
+                if isinstance(cause, urllib.error.URLError):
+                    cause = cause.reason
+                # Socket timers may fire just before the monotonic deadline.
+                # Only a read bounded by this request's remaining budget is a
+                # request timeout; shorter per-RPC timers retain their error.
+                if remaining <= timeout and isinstance(cause, TimeoutError):
+                    raise AntigravityError(
+                        "Antigravity request timed out.", code="timeout"
+                    ) from exc
             raise
         self.check()
         return data
+
+    def stream_rpc(self, method, payload, *, on_frame, on_terminal) -> None:
+        """Native Connect stream. Callbacks receive literal JSON frame bytes."""
+        from ._stream import stream_rpc
+
+        stream_rpc(self, method, payload, on_frame, on_terminal)
