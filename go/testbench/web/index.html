@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="testbench-token" content="{{.Token}}">
+  <meta name="color-scheme" content="light">
+  <title>Antigravity · Go стенд</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Antigravity <span>Go стенд</span></h1><p class="subtitle">Выберите модель и отправьте пробный запрос.</p></div>
+    <p id="mode" class="mode">Подключение…</p>
+  </header>
+  <div class="workspace">
+    <section aria-labelledby="request-title">
+      <h2 id="request-title">Запрос</h2>
+      <form id="request-form">
+        <label for="model">Модель</label>
+        <div class="model-row">
+          <select id="model" name="model" required disabled aria-describedby="model-hint"><option value="">Загрузка каталога…</option></select>
+          <button type="button" id="refresh" class="secondary" aria-label="Обновить каталог моделей">Обновить</button>
+        </div>
+        <p class="hint" id="model-hint">Получаем каталог установленного движка.</p>
+        <label for="prompt">Промпт</label>
+        <textarea id="prompt" name="prompt" required placeholder="Например: опиши изображение и перечисли основные цвета." aria-describedby="prompt-hint"></textarea>
+        <p class="hint" id="prompt-hint">Каждый запрос начинает новую беседу. Ctrl+Enter — отправить.</p>
+        <div class="attachment-header"><label for="image">Изображение <span class="optional">необязательно</span></label><span class="hint">до 20 MiB</span></div>
+        <input id="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden aria-describedby="image-hint">
+        <div class="attachment">
+          <img id="preview" hidden alt="Предпросмотр прикреплённого изображения">
+          <div class="file-info"><p id="filename">PNG, JPEG, WebP или GIF</p><p id="filesize" class="hint">Изображение будет отправлено вместе с промптом.</p></div>
+          <button id="choose-image" type="button" class="secondary">Выбрать файл</button>
+          <button id="remove-image" type="button" class="secondary" hidden>Убрать</button>
+        </div>
+        <p id="image-hint" class="hint"></p>
+        <div class="actions">
+          <button id="send" type="submit" disabled>Отправить запрос</button>
+          <button id="cancel" type="button" class="secondary cancel" disabled>Отменить</button>
+        </div>
+        <p id="error" class="error" role="alert" hidden></p>
+      </form>
+    </section>
+    <section class="result-panel" aria-labelledby="result-title">
+      <div class="result-header"><h2 id="result-title">Ответ</h2><span id="elapsed" class="hint"></span></div>
+      <p id="status" class="status" role="status" aria-live="polite">Готов к запросу</p>
+      <div id="answer" class="answer empty" aria-busy="false">Ответ модели появится здесь.</div>
+      <p id="result-meta" class="hint"></p>
+      <details id="diagnostics" hidden>
+        <summary>Детали запроса</summary>
+        <dl><dt>Модель</dt><dd id="used-model">—</dd><dt>Движок</dt><dd id="engine">—</dd><dt>Usage</dt><dd id="usage">UNKNOWN</dd></dl>
+        <pre id="usage-json"></pre>
+        <button type="button" id="download" class="secondary" disabled>Скачать JSON-отчёт</button>
+        <p id="report-note" class="hint"></p>
+      </details>
+    </section>
+  </div>
+  <footer id="footer">Локальный тестовый стенд · Go SDK</footer>
+</main>
+</body>
+</html>

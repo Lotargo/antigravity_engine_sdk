@@ -46,6 +46,8 @@ func run() int {
 	output := flag.String("output", "", "new report directory; refuses existing paths")
 	executable := flag.String("executable", "", "explicit native language_server path")
 	timeout := flag.Duration("timeout", 180*time.Second, "per-request timeout including startup and queue")
+	ui := flag.Bool("ui", false, "serve the local browser interface")
+	listen := flag.String("listen", "127.0.0.1:8765", "loopback address for --ui")
 	flag.Parse()
 	valid := map[string]bool{"all": true, "catalog": true, "text": true, "schema": true, "vision": true, "cancel": true, "image": true}
 	if !valid[*selected] {
@@ -92,6 +94,9 @@ func run() int {
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *ui {
+		return serveUI(ctx, client, mode, *model, *listen, *output)
+	}
 	r := report{Date: time.Now().Format("2006-01-02"), Mode: mode, SDK: sdk.Version, Model: *model, Checks: []check{}, Note: "Mock checks prove local protocol behavior only. Live results describe this engine/account/run. Usage covers trajectory model steps; cancelled usage and image price are UNKNOWN. Progress is polling, not token streaming."}
 	passed := true
 	var lastTrajectory sdk.Object
