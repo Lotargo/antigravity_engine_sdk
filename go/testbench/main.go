@@ -40,7 +40,7 @@ type report struct {
 func main() { mockengine.MaybeRun(); os.Exit(run()) }
 func run() int {
 	live := flag.Bool("live", false, "use installed Antigravity; generation cases make real model calls")
-	selected := flag.String("case", "all", "all, catalog, text, plain, schema, vision, cancel, image")
+	selected := flag.String("case", "all", "all, catalog, text, plain, schema, vision, cancel, image, editor")
 	model := flag.String("model", "gemini-3.8-flash-low", "exact native catalog ID (text/planner)")
 	expected := flag.String("expected-image-model", "", "assert actual image model; does not select it")
 	output := flag.String("output", "", "new report directory; refuses existing paths")
@@ -49,7 +49,7 @@ func run() int {
 	ui := flag.Bool("ui", false, "serve the local browser interface")
 	listen := flag.String("listen", "127.0.0.1:8765", "loopback address for --ui")
 	flag.Parse()
-	valid := map[string]bool{"all": true, "catalog": true, "text": true, "plain": true, "schema": true, "vision": true, "cancel": true, "image": true}
+	valid := map[string]bool{"all": true, "catalog": true, "text": true, "plain": true, "schema": true, "vision": true, "cancel": true, "image": true, "editor": true}
 	if !valid[*selected] {
 		fmt.Fprintln(os.Stderr, "unknown --case")
 		return 2
@@ -94,8 +94,15 @@ func run() int {
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *selected == "editor" {
+		if !*live {
+			fmt.Fprintln(os.Stderr, "--case editor requires --live (real native editor inference)")
+			return 2
+		}
+		return runEditorScenario(ctx, config, *output)
+	}
 	if *ui {
-		return serveUI(ctx, client, mode, *model, *listen, *output)
+		return serveUI(ctx, client, mode, *model, *listen, *output, config)
 	}
 	r := report{Date: time.Now().Format("2006-01-02"), Mode: mode, SDK: sdk.Version, Model: *model, Checks: []check{}, Note: "Mock checks prove local protocol behavior only. Live results describe this engine/account/run. Usage covers trajectory model steps; cancelled usage and image price are UNKNOWN. Progress is polling, not token streaming."}
 	passed := true

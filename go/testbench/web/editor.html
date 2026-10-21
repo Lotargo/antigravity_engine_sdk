@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="testbench-token" content="{{.Token}}"><title>Native Editor — Antigravity Go</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/editor.css"><script src="/editor.js" defer></script></head>
+<body><main>
+<header><div><p class="eyebrow">ANTIGRAVITY · GO SDK</p><h1>Supercomplete и Tab-to-Jump</h1><p>Нативные правки и переход курсора. Все изменения остаются в этом редакторе.</p></div><a href="/">Чат и изображения</a></header>
+<section class="card">
+<p>1. Загрузите пример Python и запомните исходную версию. 2. Измените код или оставьте подготовленное переименование. 3. Запустите Supercomplete, затем сразу Tab-to-Jump.</p>
+<p>Native учитывает недавние правки. После долгой паузы внесите новое изменение или заново запомните исходную версию примера.</p>
+<p>Каждая команда запускает реальную генерацию. Модель выбирает native-конфигурация редактора; расход токенов этот RPC не сообщает.</p>
+<div class="actions"><button id="example" type="button">Загрузить пример переименования</button><button id="setup" type="button">Запомнить исходную версию</button></div>
+<label for="baseline">Исходная версия</label><textarea id="baseline" rows="7" spellcheck="false" aria-describedby="baseline-help"></textarea>
+<p id="baseline-help">Нужна для истории изменений. При инициализации запрос к модели не отправляется.</p>
+<label for="code">Текущий код</label><textarea id="code" rows="15" spellcheck="false" aria-describedby="cursor status"></textarea>
+<p id="cursor">Курсор: —</p>
+<div class="actions"><button id="supercomplete" type="button" disabled>Supercomplete</button><button id="jump" type="button" disabled>Tab-to-Jump</button><button id="cancel" type="button" disabled>Отменить запрос</button></div>
+<p id="status" role="status" aria-live="polite">Сессия ещё не создана. Начните с примера.</p>
+<p id="error" role="alert"></p>
+</section>
+<section class="card"><h2>Результат</h2><p id="outcome">Правка появится после завершения потока.</p><div class="actions"><button id="apply" type="button" disabled>Применить правку к текущему коду</button><button id="move" type="button" disabled>Перейти к позиции курсора</button></div><h3>Правка кода</h3><pre id="diff">—</pre><label for="preview">Код после правки</label><textarea id="preview" rows="8" readonly spellcheck="false"></textarea><details><summary>Нативный ответ и отчёт</summary><pre id="raw"></pre><p id="report"></p></details></section>
+</main></body></html>

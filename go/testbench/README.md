@@ -47,7 +47,7 @@ vision PNG и image artifacts. Стенд пишет PASS/FAIL и возвращ
 при ошибке — последний доступный trajectory snapshot. Cancelled usage — UNKNOWN.
 
 Флаги: `go run ./testbench --help` из `go/`.
-`--case catalog|text|plain|schema|vision|cancel|image|all`, `--model`,
+`--case catalog|text|plain|schema|vision|cancel|image|editor|all`, `--model`,
 `--expected-image-model`, `--timeout 180s`, `--executable`, `--output <new-dir>`.
 
 Сборка самостоятельного Windows exe:
@@ -68,3 +68,26 @@ EXE не требует Go/Python. Для live нужен Antigravity 2.x с в�
 go run ./testbench --live --case plain --model tab_flash_lite_preview
 go run ./testbench --live --case plain --model tab_jump_flash_lite_preview
 ```
+
+Полноценный editor RPC в Go 0.3.0:
+
+```powershell
+go run ./testbench --live --case editor
+go run ./testbench --live --ui --listen 127.0.0.1:8767
+```
+
+Страница `http://127.0.0.1:8767/editor` доступна в LIVE. Загрузите пример,
+запомните исходную версию, нажмите Supercomplete, затем Tab-to-Jump.
+Пример переименовывает объявление `tax_rate` в `vat_rate`, оставляя использование
+на 29-й строке: здесь native может предложить удалённый переход и правку.
+Необязательно принимать первую подсказку Supercomplete: модель иногда предлагает
+отменить переименование. Diff и позиция показываются как есть, применять их
+можно только кнопками. Текущий текст перед запросом синхронизируется с сессией.
+Результат исчезает как применимый после редактирования текста.
+
+Инициализация истории не делает model calls; каждая команда делает один вызов.
+Команды запрашивают соответствующие tab preview ID из свежего каталога;
+реальный backend остаётся под управлением native. `--model` относится к чату.
+При отмене и в успешном editor RPC usage остаётся UNKNOWN. JSON отчёт каждой
+команды сохраняет исходный снимок, все data frames, terminal frame и статус.
+CLI `editor` пишет `editor-report.json`. Он не входит в `all` и требует `--live`.

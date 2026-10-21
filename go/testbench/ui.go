@@ -53,6 +53,7 @@ type uiServer struct {
 	mu                         sync.Mutex
 	job                        *uiJob
 	wg                         sync.WaitGroup
+	editor                     *editorStand
 }
 
 func newUIServer(ctx context.Context, c *sdk.Client, mode, model, output string) *uiServer {
@@ -65,7 +66,7 @@ func randomID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-func serveUI(ctx context.Context, c *sdk.Client, mode, model, address, output string) int {
+func serveUI(ctx context.Context, c *sdk.Client, mode, model, address, output string, config sdk.Config) int {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		fmt.Fprintln(os.Stderr, "--listen must be a loopback IP:port")
@@ -79,6 +80,10 @@ func serveUI(ctx context.Context, c *sdk.Client, mode, model, address, output st
 	appCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	app := newUIServer(appCtx, c, mode, model, output)
+	if mode == "live" {
+		app.editor = &editorStand{ctx: appCtx, config: config, output: output}
+		defer app.editor.close()
+	}
 	server := &http.Server{Handler: app.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	stopped := make(chan struct{})
 	go func() {
@@ -117,17 +122,30 @@ func (a *uiServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = t.Execute(w, struct{ Token string }{a.token})
 	})
-	for _, asset := range []string{"app.js", "style.css"} {
+	for _, asset := range []string{"app.js", "editor.js", "style.css", "editor.css"} {
 		name := asset
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			data, _ := uiAssets.ReadFile("web/" + name)
 			kind := "text/css"
-			if name == "app.js" {
+			if strings.HasSuffix(name, ".js") {
 				kind = "text/javascript"
 			}
 			w.Header().Set("Content-Type", kind+"; charset=utf-8")
 			_, _ = w.Write(data)
 		})
+	}
+	if a.editor != nil {
+		mux.HandleFunc("GET /editor", func(w http.ResponseWriter, r *http.Request) {
+			page, _ := uiAssets.ReadFile("web/editor.html")
+			t, err := template.New("editor").Parse(string(page))
+			if err != nil {
+				http.Error(w, "Template error", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_ = t.Execute(w, struct{ Token string }{a.token})
+		})
+		a.editor.routes(mux)
 	}
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, sdk.Object{"mode": a.mode, "model": a.model, "version": sdk.Version, "max_media_bytes": sdk.MaxMediaBytes})

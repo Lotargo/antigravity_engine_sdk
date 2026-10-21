@@ -1,6 +1,6 @@
 # Antigravity Engine SDK for Go
 
-Нативная Go-версия SDK `0.2.0`. Модуль:
+Нативная Go-версия SDK `0.3.0`. Модуль:
 `github.com/Lotargo/antigravity_engine_sdk/go`. Python и agy CLI не нужны.
 Go 1.23+, для live — установленный Antigravity 2.x с выполненным входом.
 Лицензия AGPL-3.0-only, см. [LICENSE](LICENSE).
@@ -168,7 +168,58 @@ catalog, err := client.RPC(ctx, "GetAvailableModels", nil,
 `RPC` даёт произвольный native метод; вызывающий проект управляет порядком и
 побочными эффектами. `Concurrent=true` читает метаданные из уже запущенного
 движка во время generation; cold start сериализован. Отдельный экспортируемый
-`Engine` в Go 0.1.0 отсутствует: raw RPC доступен через `Client`.
+`Engine` в Go отсутствует: raw RPC доступен через `Client`.
+
+## Нативный редактор: Supercomplete и Tab-to-Jump
+
+`EditorSession` держит отдельный native процесс и временный workspace.
+`Sync` получает фактические снимки текста, без вызова модели; первая версия
+становится исходной. Реальные файлы проекта API не меняет.
+
+```go
+editor, err := ag.NewEditorSession(ag.Config{})
+if err != nil { log.Fatal(err) }
+defer editor.Close()
+doc := ag.EditorDocument{Name: "sample.py", Language: "python",
+    Text: "def add(a, b):\n    return a + b\n", CursorOffset: 26}
+if err := editor.Sync(ctx, doc); err != nil { log.Fatal(err) }
+doc.Text = "def add(a, b):\n    return \n"
+doc.CursorOffset = len("def add(a, b):\n    return ")
+if err := editor.Sync(ctx, doc); err != nil { log.Fatal(err) }
+edit, err := editor.Supercomplete(ctx, nil)
+if err != nil { log.Fatal(err) }
+// Проверенный предпросмотр: без записи на диск и автоматического применения.
+preview, previewErr := edit.Preview(doc.Text)
+_ = preview
+_ = previewErr // filtered/no-op/empty не являются применимой правкой
+jump, err := editor.TabToJump(ctx, nil)
+if err != nil { log.Fatal(err) }
+if jump.Status == "jump" {
+    fmt.Println(jump.Response.JumpPosition.Row, jump.Response.JumpPosition.Col)
+}
+```
+
+`CursorOffset` — байты UTF-8, позиция на границе символа. `JumpPosition`
+содержит нативные zero-based `row/col`; IDE использует их как позицию редактора.
+`SelectionEndLine` — exclusive, одинаковые start/end обозначают одну строку.
+`Preview` сверяет SHA-256 снимка и весь исходный текст CharacterDiff, сохраняет
+окончания строк, отклоняет неизвестные изменения и устаревший исходник.
+Не применяйте промежуточные кадры: они являются растущими снимками результата.
+
+Перед первым `TabToJump` нужен явный `Supercomplete`: `TYPING` в этом запросе
+инициализирует granular history native 2.24. Скрытого model warm-up нет.
+Команды запрашивают `tab_flash_lite_preview` / `tab_jump_flash_lite_preview`:
+native ID каждый раз читается из свежего каталога, сохраняется в
+`RequestedModel` / `RequestedNativeModel` и передаётся в requestedModelId.
+Это другой API, чем `Complete`. Native-конфигурация может влиять на routing;
+точное имя реально выбранной модели и token usage этот ответ не
+подтверждает (`Usage: UNKNOWN`). Поля diff/comboDiff и буквальные JSON-кадры
+сохраняются в результате. Отмена через context прерывает HTTP stream;
+незавершённый ответ имеет `Status: incomplete` и не применяется.
+
+Ручной стенд: `go run ./testbench --live --ui --listen 127.0.0.1:8767`,
+затем `/editor`. CLI-проба: `go run ./testbench --live --case editor`.
+Подробности проверок: [EDITOR-VALIDATION-2026-10-21.md](EDITOR-VALIDATION-2026-10-21.md).
 
 ## Диагностика и границы
 
