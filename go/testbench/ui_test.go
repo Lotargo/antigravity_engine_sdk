@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,49 @@ func uiCall(t *testing.T, a *uiServer, s *httptest.Server, method, path string, 
 		t.Fatal(err)
 	}
 	return res.StatusCode, data
+}
+
+func TestEditorLocalAssetsAndStyleNonce(t *testing.T) {
+	a, _ := testUI(t)
+	a.editor = &editorStand{}
+	s := httptest.NewServer(a.handler())
+	defer s.Close()
+	var previous string
+	for i := 0; i < 2; i++ {
+		response, err := s.Client().Get(s.URL + "/editor")
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != 200 {
+			t.Fatal(response.StatusCode, err)
+		}
+		match := regexp.MustCompile(`name="editor-style-nonce" content="([a-f0-9]{48})"`).FindSubmatch(page)
+		if len(match) != 2 {
+			t.Fatal("editor style nonce missing")
+		}
+		nonce := string(match[1])
+		policy := response.Header.Get("Content-Security-Policy")
+		if nonce == previous || !strings.Contains(policy, "style-src 'self' 'nonce-"+nonce+"'") || !strings.Contains(policy, "script-src 'self';") || strings.Contains(policy, "unsafe-inline") {
+			t.Fatal("editor styles must use a fresh, matching nonce under strict script policy", policy)
+		}
+		previous = nonce
+	}
+	for _, asset := range []struct{ path, kind, marker string }{
+		{"/code-editor.js", "text/javascript", "createCodeEditor"},
+		{"/editor-licenses.txt", "text/plain", "@codemirror/view@"},
+	} {
+		response, err := s.Client().Get(s.URL + asset.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != 200 || !strings.HasPrefix(response.Header.Get("Content-Type"), asset.kind) || !strings.Contains(string(body), asset.marker) {
+			t.Fatal("local editor asset missing or wrong MIME type", asset.path, response.StatusCode, err)
+		}
+	}
 }
 func uiSubmit(t *testing.T, a *uiServer, s *httptest.Server, prompt string, image []byte) (int, *uiJob) {
 	return uiSubmitMode(t, a, s, prompt, image, "finish")

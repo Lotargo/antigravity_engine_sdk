@@ -122,11 +122,14 @@ func (a *uiServer) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = t.Execute(w, struct{ Token string }{a.token})
 	})
-	for _, asset := range []string{"app.js", "editor.js", "style.css", "editor.css"} {
+	for _, asset := range []string{"app.js", "editor.js", "style.css", "editor.css", "code-editor.js", "editor-licenses.txt"} {
 		name := asset
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			data, _ := uiAssets.ReadFile("web/" + name)
 			kind := "text/css"
+			if strings.HasSuffix(name, ".txt") {
+				kind = "text/plain"
+			}
 			if strings.HasSuffix(name, ".js") {
 				kind = "text/javascript"
 			}
@@ -142,8 +145,10 @@ func (a *uiServer) handler() http.Handler {
 				http.Error(w, "Template error", 500)
 				return
 			}
+			styleNonce := randomID()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_ = t.Execute(w, struct{ Token string }{a.token})
+			w.Header().Set("Content-Security-Policy", strings.Replace(w.Header().Get("Content-Security-Policy"), "style-src 'self'", "style-src 'self' 'nonce-"+styleNonce+"'", 1))
+			_ = t.Execute(w, struct{ Token, StyleNonce string }{a.token, styleNonce})
 		})
 		a.editor.routes(mux)
 	}

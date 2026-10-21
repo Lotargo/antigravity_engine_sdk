@@ -8,3 +8,4 @@ build/
 dist/
 reports/
 go/testbench/bin/
+node_modules/

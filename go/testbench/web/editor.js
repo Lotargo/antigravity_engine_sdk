@@ -1,7 +1,14 @@
 'use strict';
+import {createCodeEditor} from './code-editor.js';
 const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="testbench-token"]').content;
+const nonce = document.querySelector('meta[name="editor-style-nonce"]').content;
 let ready = false, busy = false, commandActive = false, hasDocument = false, latest = null, sentText = '', poll;
+const editors={};
+editors.baseline=createCodeEditor({nonce,parent:$('baseline'),labelledBy:'baseline-label',describedBy:'baseline-help',onChange:()=>{ready=false;latest=null;controls();$('status').textContent='Исходная версия изменена. Нажмите «Запомнить исходную версию».';}});
+editors.code=createCodeEditor({nonce,parent:$('code'),labelledBy:'code-label',describedBy:'editor-help cursor status',onChange:()=>{hasDocument=true;$('download-status').textContent='';$('status').textContent='Код изменён в редакторе. Можно скачать файл или запустить новую команду.';},onSelection:cursor});
+editors.preview=createCodeEditor({nonce,parent:$('preview'),labelledBy:'preview-label',readOnly:true});
+function setLanguage(language) {for(const editor of Object.values(editors))editor.setLanguage(language);}
 async function api(path, body) {
   const response = await fetch('/api/editor/' + path, {method: body === undefined ? 'GET' : 'POST', headers: {'X-Testbench-Token': token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const value = await response.json();
@@ -9,29 +16,30 @@ async function api(path, body) {
   return value;
 }
 function controls() {
-  for (const id of ['code-file', 'language', 'example', 'completion-example', 'setup', 'baseline', 'code']) $(id).disabled = busy;
+  for (const id of ['code-file', 'language', 'example', 'completion-example', 'setup']) $(id).disabled = busy;
+  editors.baseline.setLocked(busy);editors.code.setLocked(busy);
   $('supercomplete').disabled = busy || !ready;
   $('jump').disabled = busy || !ready;
   $('cancel').disabled = !busy || !commandActive;
   $('download').disabled = busy || !hasDocument;
-  const valid = !busy && latest && $('code').value === sentText;
+  const valid = !busy && latest && editors.code.getText() === sentText;
   $('apply').disabled = !valid || latest.preview === undefined || latest.preview === sentText;
   $('move').disabled = !valid || !latest.result?.response?.jumpPosition || latest.result?.status !== 'jump';
 }
 function cursor() {
-  const before = $('code').value.slice(0, $('code').selectionStart), lines = before.split('\n');
+  const before = editors.code.getText().slice(0,editors.code.getOffset()), lines = before.split('\n');
   $('cursor').textContent = `Курсор: строка ${lines.length}, столбец ${lines.at(-1).length + 1} · UTF-8 offset ${new TextEncoder().encode(before).length}`;
   controls();
 }
 function documentValue(text) {
-  return {name:$('filename').value, language:$('language').value, text, cursor_offset: new TextEncoder().encode(text.slice(0,$('code').selectionStart)).length};
+  return {name:$('filename').value, language:$('language').value, text, cursor_offset: new TextEncoder().encode(text.slice(0,editors.code.getOffset())).length};
 }
 function failure(error) { $('error').textContent = error.message; busy = false; commandActive=false; controls(); }
 function loadDocument(name, language, before, after, offset) {
   hasDocument=true;$('download-status').textContent='';
   $('filename').value=name; $('language').value=language;
-  $('baseline').value=before; $('code').value=after; $('code').setSelectionRange(offset,offset);
-  ready=false;latest=null;$('error').textContent='';$('preview').value='';$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';
+  setLanguage(language);editors.baseline.setDocument(before);editors.code.setDocument(after,offset);
+  ready=false;latest=null;$('error').textContent='';editors.preview.setDocument('');$('diff').textContent='—';$('raw').textContent='';$('report').textContent='';
   $('outcome').textContent='Правка появится после завершения потока.';
   $('status').textContent=`Загружен ${name}. Нажмите «Запомнить исходную версию».`;cursor();
 }
@@ -50,7 +58,7 @@ $('code-file').onchange = async () => {
   } catch(e) {$('code-file').setAttribute('aria-invalid','true');failure(e);}
   finally {$('code-file').value='';busy=false;controls();}
 };
-$('language').onchange = () => {ready=false;latest=null;controls();$('status').textContent='Язык изменён. Нажмите «Запомнить исходную версию».';};
+$('language').onchange = () => {setLanguage($('language').value);editors.code.clearJump();ready=false;latest=null;controls();$('status').textContent='Язык изменён. Нажмите «Запомнить исходную версию».';};
 async function loadExample(kind) {
   busy=true;controls();
   try {const v = await api('example?kind=' + kind); loadDocument('sample.py','python',v.before,v.after,v.cursor);$('code-file').removeAttribute('aria-invalid');} catch(e){failure(e);}
@@ -60,10 +68,10 @@ $('example').onclick = () => loadExample('tab_jump');
 $('completion-example').onclick = () => loadExample('supercomplete');
 $('setup').onclick = async () => {
   busy=true;latest=null;controls();$('error').textContent='';$('status').textContent='Создаю сессию и историю исходного текста…';
-  try {await api('setup',{...documentValue($('baseline').value),cursor_offset:0});ready=true;$('status').textContent='Сессия готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.';busy=false;controls();} catch(e){ready=false;failure(e);}
+  try {await api('setup',{...documentValue(editors.baseline.getText()),cursor_offset:0});ready=true;$('status').textContent='Сессия готова. Supercomplete и Tab-to-Jump можно запускать отдельно, в любой момент.';busy=false;controls();} catch(e){ready=false;failure(e);}
 };
 async function run(kind) {
-  busy=true;commandActive=true;latest=null;sentText=$('code').value;controls();$('error').textContent='';$('preview').value='';$('diff').textContent='—';$('outcome').textContent='Ожидание нативного потока…';$('status').textContent='Запрос выполняется…';
+  busy=true;commandActive=true;latest=null;sentText=editors.code.getText();editors.code.clearJump();controls();$('error').textContent='';editors.preview.setDocument('');$('diff').textContent='—';$('outcome').textContent='Ожидание нативного потока…';$('status').textContent='Запрос выполняется…';
   try {await api('run',{kind,document:documentValue(sentText)});poll=setInterval(refresh,300);await refresh();} catch(e){failure(e);}
 }
 async function refresh() {
@@ -72,7 +80,7 @@ async function refresh() {
     if (['running','cancelling'].includes(v.status)) return;
     clearInterval(poll);busy=false;commandActive=false;latest=v;
     $('error').textContent=v.error || v.report_error || '';
-    $('preview').value=v.preview ?? '';
+    editors.preview.setDocument(v.preview ?? '');
     const r=v.result?.response,j=r?.jumpPosition;
     $('outcome').textContent = r?.filterReason ? `Подсказка отфильтрована: ${r.filterReason.reason}` : j && v.result.status==='jump' ? `Переход: строка ${Number(j.row||0)+1}, столбец ${Number(j.col||0)+1}. Нативная позиция: row=${j.row||0}, col=${j.col||0}.` : v.result?.status==='empty' ? (v.result.kind === 'SUPERCOMPLETE' ? 'В этом запросе native не предложил правку.' : 'В этом запросе native не предложил переход.') : `Результат: ${v.result?.status || v.status}. ${v.preview_error || ''}`;
     $('diff').textContent=(r?.diff?.lines || []).map(line=>(line.type==='UNIFIED_DIFF_LINE_TYPE_INSERT'?'+ ':line.type==='UNIFIED_DIFF_LINE_TYPE_DELETE'?'- ':'  ')+(line.text || '')).join('\n') || '—';
@@ -81,16 +89,19 @@ async function refresh() {
 }
 $('supercomplete').onclick=()=>run('supercomplete');$('jump').onclick=()=>run('tab_jump');
 $('cancel').onclick=async()=>{try{await api('cancel',{});}catch(e){failure(e);}};
-$('apply').onclick=()=>{if($('code').value!==sentText)return;$('code').value=latest.preview;latest=null;cursor();$('status').textContent='Правка применена в редакторе. Можно скачать текущий файл.';};
+$('apply').onclick=()=>{if(editors.code.getText()!==sentText)return;editors.code.replaceText(latest.preview);latest=null;cursor();$('status').textContent='Правка применена в редакторе. Можно скачать текущий файл.';};
 $('download').onclick=()=>{
   if(busy || !hasDocument)return;
-  const url=URL.createObjectURL(new Blob([$('code').value],{type:'text/plain;charset=utf-8'}));
+  const url=URL.createObjectURL(new Blob([editors.code.getText()],{type:'text/plain;charset=utf-8'}));
   const link=document.createElement('a');link.href=url;link.download=$('filename').value;
   document.body.appendChild(link);
   try {link.click();$('download-status').textContent=`Скачивание ${link.download} начато.`;}
   finally {link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 };
-$('move').onclick=()=>{if($('code').value!==sentText)return;const j=latest.result.response.jumpPosition,lines=sentText.split('\n'),row=Number(j.row||0),col=Number(j.col||0);if(row>=lines.length||col>lines[row].length){$('error').textContent='Позиция вне текущего текста.';return;}const offset=lines.slice(0,row).reduce((n,line)=>n+line.length+1,0)+col;$('code').focus();$('code').setSelectionRange(offset,offset);const lineHeight=parseFloat(getComputedStyle($('code')).lineHeight);$('code').scrollTop=Math.max(0,row*lineHeight-$('code').clientHeight/2);cursor();};
-for(const event of ['input','click','keyup','select'])$('code').addEventListener(event,cursor);
-$('code').addEventListener('input',()=>{hasDocument=true;$('download-status').textContent='';controls();});
+$('move').onclick=()=>{
+  if(editors.code.getText()!==sentText)return;
+  const j=latest.result.response.jumpPosition,row=Number(j.row||0),col=Number(j.col||0);
+  try {editors.code.jumpTo(row,col);cursor();$('status').textContent=`Курсор переведён: строка ${row+1}, столбец ${col+1}. Цель перехода выделена в коде.`;}
+  catch(error){$('error').textContent=error.message;}
+};
 controls();
