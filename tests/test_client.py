@@ -117,6 +117,39 @@ def test_dead_engine_is_replaced(boundary):
     assert len(boundary.processes) == 2
 
 
+def test_catalog_reflects_provider_additions_and_removals_on_the_same_client(boundary):
+    client = boundary.client()
+    assert "text-only" in {model.id for model in client.models()}
+    boundary.set("catalog_changed")
+    models = {model.id: model for model in client.models()}
+    assert "text-only" not in models and "new-model" in models
+    assert models["new-model"].raw["providerFlag"] is True
+    assert len(boundary.calls("GetAvailableModels")) == 2
+    assert len(boundary.processes) == 1
+
+
+@pytest.mark.parametrize(
+    ("scenario", "code"),
+    [
+        ("send_error", "provider_error"),
+        ("retired", "model_unavailable"),
+    ],
+)
+def test_request_errors_do_not_poison_catalog_or_block_the_next_attempt(
+    boundary, scenario, code
+):
+    client = boundary.client()
+    boundary.set(scenario)
+    with pytest.raises(AntigravityError) as caught:
+        client.chat("test", model="gemini-2.5-pro")
+    assert caught.value.code == code
+    assert "gemini-2.5-pro" in {model.id for model in client.models()}
+    boundary.set("success")
+    assert client.chat("retry", model="gemini-2.5-pro").text == "Native SDK answer"
+    assert len(boundary.calls("StartCascade")) == 2
+    assert len(boundary.processes) == 1
+
+
 @pytest.mark.parametrize(
     ("scenario", "code"),
     [

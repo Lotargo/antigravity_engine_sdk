@@ -38,6 +38,9 @@ class Handler(BaseHTTPRequestHandler):
     "internal": {"model": "MODEL_INTERNAL", "isInternal": True},
     "bad": {"displayName": "No enum"}
    }}}
+   if scenario == "catalog_changed":
+    result["response"]["models"].pop("text-only")
+    result["response"]["models"]["new-model"] = {"model": "MODEL_NEW", "displayName": "New model", "providerFlag": True}
   if method == "StartCascade":
    count += 1
    result = {"cascadeId": "cascade-%d" % count} if scenario != "no_id" else {}
