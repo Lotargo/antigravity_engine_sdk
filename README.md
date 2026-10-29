@@ -9,6 +9,9 @@ image generation and native editor commands. Each SDK starts and owns its native
 `language_server` process and talks to it over local Connect JSON RPC.
 The Antigravity desktop app and agy CLI do not need to be running.
 
+[Article: Antigravity's Hidden Models](https://lotargo.github.io/blog/posts/antigravity-hidden-models.html)
+explores older and helper models, custom pipelines, and Pro / Ultra subscription economics.
+
 | Component | Version | Requirements |
 | --- | --- | --- |
 | Python SDK | **0.2.0** | Python 3.10+ and `jsonschema` |

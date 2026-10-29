@@ -8,6 +8,9 @@ SDK используют существующий вход в Antigravity, са�
 `language_server` и общаются с ним по локальному Connect JSON RPC. Запуск Desktop
 и agy CLI не требуется. Python и Go работают независимо друг от друга.
 
+[Статья «Скрытые модели Antigravity»](https://lotargo.github.io/blog/posts/antigravity-hidden-models.html):
+старые и служебные модели, собственные пайплайны и экономика подписок Pro / Ultra.
+
 | Компонент | Версия |
 | --- | --- |
 | Python SDK, Python 3.10+ | **0.2.0** |
